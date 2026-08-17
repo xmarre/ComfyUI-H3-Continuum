@@ -52,14 +52,23 @@ def _validate_regenerate_storage(run_storage: str, regenerate_from: int) -> None
 
 
 def _validate_reference_checkpoint(
-    prompt, unique_id, *, strict_compatibility: bool
+    prompt,
+    unique_id,
+    *,
+    strict_compatibility: bool,
+    reference_images: bool = False,
 ) -> str:
-    from ..graph_contract import classify_h3_checkpoint
+    from ..graph_contract import CHECKPOINT_FL2VA, classify_h3_checkpoint
 
-    # Checkpoint choice is diagnostic only. Strict Compatibility remains
-    # reserved for H3 contracts that are actually unsafe or unsupported.
+    # Unknown/wrapped checkpoints remain diagnostic-only. A positively identified
+    # FL2VA checkpoint is a known incompatible contract for Reference Images.
     _ = strict_compatibility
-    return classify_h3_checkpoint(prompt, unique_id)
+    checkpoint = classify_h3_checkpoint(prompt, unique_id)
+    if reference_images and checkpoint == CHECKPOINT_FL2VA:
+        raise ValueError(
+            "Reference Images require a Ref2VA checkpoint; FL2VA is incompatible"
+        )
+    return checkpoint
 
 
 class H3ContinuumAdvancedV3:
@@ -626,6 +635,7 @@ class H3ContinuumSamplerProduction(H3ContinuumSamplerV3):
                 prompt,
                 unique_id,
                 strict_compatibility=bool(strict_compatibility),
+                reference_images=reference_assets is not None,
             )
 
         def report_with_reference_status(report):
