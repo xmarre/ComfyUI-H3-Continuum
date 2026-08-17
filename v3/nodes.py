@@ -582,6 +582,7 @@ class H3ContinuumSamplerProduction(H3ContinuumSamplerV3):
         reference_audio_1=None,
         reference_audio_vae=None,
         timeline_video_source=None,
+        **dynamic_inputs,
     ):
         from ..reference import prepare_reference_assets
         from ..reference_audio import prepare_reference_audio_source
@@ -596,6 +597,11 @@ class H3ContinuumSamplerProduction(H3ContinuumSamplerV3):
             output_height=int(height),
             size_mode=reference_size,
             reference_image_3=reference_image_3,
+            reference_image_4=dynamic_inputs.get("reference_image_4"),
+            reference_image_5=dynamic_inputs.get("reference_image_5"),
+            reference_image_6=dynamic_inputs.get("reference_image_6"),
+            reference_image_7=dynamic_inputs.get("reference_image_7"),
+            reference_image_8=dynamic_inputs.get("reference_image_8"),
         )
         reference_audio_source = prepare_reference_audio_source(
             reference_audio_1,
