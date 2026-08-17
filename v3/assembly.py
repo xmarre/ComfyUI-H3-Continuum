@@ -30,6 +30,17 @@ VIDEO_SEAM_ANALYSIS_OPTIONS = (
     VIDEO_SEAM_ANALYZE,
     VIDEO_SEAM_OFF,
 )
+IMAGE_OUTPUT_AUTO = "Auto"
+IMAGE_OUTPUT_CUDA = "CUDA"
+IMAGE_OUTPUT_CPU = "CPU"
+IMAGE_OUTPUT_DEVICE_OPTIONS = (
+    IMAGE_OUTPUT_AUTO,
+    IMAGE_OUTPUT_CUDA,
+    IMAGE_OUTPUT_CPU,
+)
+_GIB = 1024**3
+_AUTO_CUDA_MIN_HEADROOM = 2 * _GIB
+_AUTO_CUDA_HEADROOM_FRACTION = 0.10
 
 
 def _singleton(value: Any, name: str) -> Any:
@@ -48,6 +59,108 @@ def _chunk_list(value: Any) -> list[Any]:
     return [value]
 
 
+def _tensor_nbytes(shape: tuple[int, ...], dtype: torch.dtype) -> int:
+    elements = 1
+    for dimension in shape:
+        elements *= int(dimension)
+    return elements * torch.empty((), dtype=dtype).element_size()
+
+
+def _resolve_image_output_device(
+    images: list[Any],
+    output_shape: tuple[int, int, int, int],
+    preference: str,
+) -> torch.device:
+    preference = str(preference)
+    if preference not in IMAGE_OUTPUT_DEVICE_OPTIONS:
+        raise ValueError(f"unknown Image Output Device: {preference!r}")
+    if preference == IMAGE_OUTPUT_CPU:
+        return torch.device("cpu")
+
+    if not torch.cuda.is_available():
+        if preference == IMAGE_OUTPUT_CUDA:
+            raise RuntimeError("Image Output Device CUDA requires CUDA")
+        return torch.device("cpu")
+
+    first_tensor = next((item for item in images if torch.is_tensor(item)), None)
+    cuda_device = (
+        first_tensor.device
+        if first_tensor is not None and first_tensor.device.type == "cuda"
+        else torch.device("cuda")
+    )
+    if preference == IMAGE_OUTPUT_CUDA:
+        return cuda_device
+
+    if first_tensor is not None and first_tensor.device.type == "cuda":
+        return cuda_device
+
+    try:
+        free_bytes, total_bytes = torch.cuda.mem_get_info(cuda_device)
+    except Exception:
+        return torch.device("cpu")
+
+    output_bytes = _tensor_nbytes(output_shape, first_tensor.dtype)
+    frame_bytes = _tensor_nbytes(output_shape[1:], first_tensor.dtype)
+    headroom = max(
+        _AUTO_CUDA_MIN_HEADROOM,
+        int(total_bytes * _AUTO_CUDA_HEADROOM_FRACTION),
+    )
+    if free_bytes >= output_bytes + frame_bytes + headroom:
+        return cuda_device
+    return torch.device("cpu")
+
+
+def _apply_video_patch(
+    image_buffer: torch.Tensor,
+    *,
+    frame_start: int,
+    net_frames: int,
+    patch: torch.Tensor | None,
+) -> None:
+    if patch is None:
+        return
+    if not torch.is_tensor(patch) or patch.ndim != 4:
+        raise ValueError("video seam patch must be an IMAGE tensor [frames,H,W,C]")
+    patch_frames = int(patch.shape[0])
+    if patch_frames < 1 or patch_frames > int(net_frames):
+        raise ValueError("video seam patch frame count is outside the retained segment")
+    if tuple(patch.shape[1:]) != tuple(image_buffer.shape[1:]):
+        raise ValueError("video seam patch geometry changed at assembly")
+    image_buffer[frame_start : frame_start + patch_frames].copy_(
+        patch.to(device=image_buffer.device, dtype=image_buffer.dtype)
+    )
+
+
+def _enforce_image_duration_in_place(
+    image_buffer: torch.Tensor,
+    *,
+    current_frames: int,
+    target_frames: int,
+    preserve_final_frame: bool,
+) -> torch.Tensor:
+    """Apply exact-duration image trim/pad inside the already-owned output buffer."""
+    current_frames = int(current_frames)
+    target_frames = int(target_frames)
+    if target_frames < 1:
+        raise ValueError("target_frames must be positive")
+    if current_frames < 1:
+        raise ValueError("cannot adjust an empty image sequence")
+    if int(image_buffer.shape[0]) < max(current_frames, target_frames):
+        raise ValueError("image output buffer has insufficient exact-duration capacity")
+
+    adjustment = target_frames - current_frames
+    if adjustment < 0:
+        if preserve_final_frame and target_frames >= 2:
+            image_buffer[target_frames - 1].copy_(image_buffer[current_frames - 1])
+    elif adjustment > 0:
+        image_buffer[current_frames:target_frames].copy_(
+            image_buffer[current_frames - 1 : current_frames].expand(
+                adjustment, *image_buffer.shape[1:]
+            )
+        )
+    return image_buffer[:target_frames]
+
+
 def assemble_decoded_chunks(
     *,
     images: list[Any],
@@ -56,6 +169,8 @@ def assemble_decoded_chunks(
     exact_total_duration: bool,
     audio_seam: str,
     diagnostics: str,
+    image_output_device: str = IMAGE_OUTPUT_AUTO,
+    video_patches: dict[int, torch.Tensor] | None = None,
 ):
     plan = validate_assembly_plan(assembly_plan)
     diagnostics_mode = normalize_diagnostics_mode(diagnostics)
@@ -70,6 +185,12 @@ def assemble_decoded_chunks(
         )
 
     total_retained_frames = sum(int(item["net_frames"]) for item in chunk_plans)
+    target_frames = int(plan["target_frames"])
+    image_capacity_frames = (
+        max(total_retained_frames, target_frames)
+        if exact_total_duration
+        else total_retained_frames
+    )
     image_buffer = None
     audio_buffer = None
     audio_rate = None
@@ -78,13 +199,14 @@ def assemble_decoded_chunks(
         "H3 Continuum Assemble V3",
         f"Audio Seam: {audio_seam}. Video seam correction is disabled.",
     ]
+    video_patches = video_patches or {}
 
     for index, (raw_images, raw_audio, chunk) in enumerate(
         zip(images, audio, chunk_plans), start=1
     ):
         if not torch.is_tensor(raw_images) or raw_images.ndim != 4:
             raise ValueError(f"decoded image chunk {index} must be [frames,H,W,C]")
-        raw_images = raw_images.detach().to("cpu")
+        raw_images = raw_images.detach()
         total_frames = int(chunk["total_frames"])
         trim_frames = int(chunk["trim_frames"])
         net_frames = int(chunk["net_frames"])
@@ -93,7 +215,7 @@ def assemble_decoded_chunks(
                 f"decoded image chunk {index} has {raw_images.shape[0]} frames; "
                 f"expected at least {total_frames}"
             )
-        segment_images = raw_images[:total_frames][trim_frames:].contiguous()
+        segment_images = raw_images[:total_frames][trim_frames:]
         if int(segment_images.shape[0]) != net_frames:
             raise ValueError(
                 f"decoded image chunk {index} retained {segment_images.shape[0]} frames; "
@@ -120,14 +242,48 @@ def assemble_decoded_chunks(
         )
 
         if image_buffer is None:
-            image_buffer = torch.empty(
-                (total_retained_frames, *segment_images.shape[1:]),
-                dtype=segment_images.dtype,
-                device="cpu",
+            output_shape = (
+                image_capacity_frames,
+                int(segment_images.shape[1]),
+                int(segment_images.shape[2]),
+                int(segment_images.shape[3]),
             )
+            output_device = _resolve_image_output_device(
+                images,
+                output_shape,
+                image_output_device,
+            )
+            image_buffer = torch.empty(
+                output_shape,
+                dtype=segment_images.dtype,
+                device=output_device,
+            )
+            if diagnostics_mode == DIAGNOSTICS_FULL:
+                actual_height = int(segment_images.shape[1])
+                actual_width = int(segment_images.shape[2])
+                plan_width = int(plan["width"])
+                plan_height = int(plan["height"])
+                scale_x = actual_width / float(plan_width)
+                scale_y = actual_height / float(plan_height)
+                output_mib = _tensor_nbytes(output_shape, segment_images.dtype) / (1024**2)
+                reports.append(
+                    "Decoded geometry: "
+                    f"{actual_width}x{actual_height} vs plan {plan_width}x{plan_height} "
+                    f"({scale_x:.3f}x/{scale_y:.3f}x); image buffer "
+                    f"{image_capacity_frames} frames, {output_mib:.1f} MiB on {output_device}."
+                )
         elif tuple(segment_images.shape[1:]) != tuple(image_buffer.shape[1:]):
             raise ValueError(f"decoded image geometry changed at chunk {index}")
-        image_buffer[frame_cursor:frame_stop].copy_(segment_images)
+
+        image_buffer[frame_cursor:frame_stop].copy_(
+            segment_images.to(device=image_buffer.device, dtype=image_buffer.dtype)
+        )
+        _apply_video_patch(
+            image_buffer,
+            frame_start=frame_cursor,
+            net_frames=net_frames,
+            patch=video_patches.get(index - 1),
+        )
 
         if audio_buffer is None:
             audio_buffer = torch.empty(
@@ -194,26 +350,43 @@ def assemble_decoded_chunks(
             f"V3 assembly cursor mismatch: {frame_cursor} != {total_retained_frames}"
         )
 
+    result_images = image_buffer[:total_retained_frames]
     result_audio = {
         "waveform": audio_buffer.contiguous(),
         "sample_rate": audio_rate,
     }
     duration_report = ""
     if exact_total_duration:
-        image_buffer, result_audio, duration_report = enforce_total_frames(
-            image_buffer.contiguous(),
-            result_audio,
-            target_frames=int(plan["target_frames"]),
-            preserve_final_frame=bool(plan.get("preserve_final_frame")),
+        preserve_final_frame = bool(plan.get("preserve_final_frame"))
+        result_images = _enforce_image_duration_in_place(
+            image_buffer,
+            current_frames=total_retained_frames,
+            target_frames=target_frames,
+            preserve_final_frame=preserve_final_frame,
         )
+        # Reuse the existing, validated audio exact-duration policy with a tiny
+        # placeholder image tensor. This keeps identical audio trim/pad semantics
+        # without making enforce_total_frames allocate another full video tensor.
+        duration_probe = torch.empty(
+            (total_retained_frames, 1, 1, 1),
+            dtype=torch.uint8,
+            device="cpu",
+        )
+        _, result_audio, duration_report = enforce_total_frames(
+            duration_probe,
+            result_audio,
+            target_frames=target_frames,
+            preserve_final_frame=preserve_final_frame,
+        )
+        del duration_probe
 
     reports.append(
         f"Assembled {len(chunk_plans)} externally decoded chunks into "
-        f"{image_buffer.shape[0]} frames with cumulative sample-boundary alignment."
+        f"{result_images.shape[0]} frames with cumulative sample-boundary alignment."
     )
     if duration_report:
         reports.append(duration_report)
-    return image_buffer.contiguous(), result_audio, "\n".join(reports)
+    return result_images.contiguous(), result_audio, "\n".join(reports)
 
 
 class H3ContinuumAssembleV3:
@@ -242,6 +415,18 @@ class H3ContinuumAssembleV3:
                         ),
                     },
                 ),
+                "image_output_device": (
+                    IMAGE_OUTPUT_DEVICE_OPTIONS,
+                    {
+                        "default": IMAGE_OUTPUT_AUTO,
+                        "display_name": "Image Output Device",
+                        "tooltip": (
+                            "Auto keeps the assembled IMAGE in VRAM when the full output plus "
+                            "conservative headroom fits. CUDA is useful after high-resolution "
+                            "latent upscaling because it avoids a second full-video CPU buffer."
+                        ),
+                    },
+                ),
                 "diagnostics": (
                     DIAGNOSTICS_OPTIONS,
                     {
@@ -266,6 +451,7 @@ class H3ContinuumAssembleV3:
         exact_total_duration,
         audio_seam,
         diagnostics,
+        image_output_device=IMAGE_OUTPUT_AUTO,
     ):
         return assemble_decoded_chunks(
             images=_chunk_list(images),
@@ -276,7 +462,12 @@ class H3ContinuumAssembleV3:
             ),
             audio_seam=str(_singleton(audio_seam, "audio_seam")),
             diagnostics=str(_singleton(diagnostics, "diagnostics")),
+            image_output_device=str(
+                _singleton(image_output_device, "image_output_device")
+            ),
         )
+
+
 # V3.0.1 hardening integration: preflight before allocation; Detailed Report only.
 from ..hardening import assemble_with_hardening as _assemble_with_hardening
 
@@ -325,6 +516,7 @@ class H3ContinuumAssembleSeamExperimental(H3ContinuumAssembleV3):
         audio_seam,
         video_seam,
         diagnostics,
+        image_output_device=IMAGE_OUTPUT_AUTO,
     ):
         mode = str(_singleton(video_seam, "video_seam"))
         if mode not in VIDEO_SEAM_ANALYSIS_OPTIONS:
@@ -337,6 +529,7 @@ class H3ContinuumAssembleSeamExperimental(H3ContinuumAssembleV3):
                 exact_total_duration,
                 audio_seam,
                 diagnostics,
+                image_output_device=image_output_device,
             )
 
         image_chunks = _chunk_list(images)
@@ -344,10 +537,11 @@ class H3ContinuumAssembleSeamExperimental(H3ContinuumAssembleV3):
         analyses = []
         analysis_error = None
         actions = {}
+        video_patches = {}
         try:
             from .video_seam import (
                 analyze_decoded_boundaries,
-                correct_decoded_boundaries,
+                build_decoded_boundary_patches,
                 format_video_boundary_analysis,
             )
 
@@ -356,7 +550,7 @@ class H3ContinuumAssembleSeamExperimental(H3ContinuumAssembleV3):
                 assembly_plan=plan,
             )
             if mode in (VIDEO_SEAM_AUTO, VIDEO_SEAM_AUTO_2):
-                image_chunks, actions = correct_decoded_boundaries(
+                video_patches, actions = build_decoded_boundary_patches(
                     images=image_chunks,
                     assembly_plan=plan,
                     analyses=analyses,
@@ -364,6 +558,7 @@ class H3ContinuumAssembleSeamExperimental(H3ContinuumAssembleV3):
                 )
         except Exception as exc:
             analysis_error = exc
+            video_patches = {}
 
         result_images, result_audio, report = assemble_decoded_chunks(
             images=image_chunks,
@@ -374,6 +569,10 @@ class H3ContinuumAssembleSeamExperimental(H3ContinuumAssembleV3):
             ),
             audio_seam=str(_singleton(audio_seam, "audio_seam")),
             diagnostics=str(_singleton(diagnostics, "diagnostics")),
+            image_output_device=str(
+                _singleton(image_output_device, "image_output_device")
+            ),
+            video_patches=video_patches,
         )
         if mode == VIDEO_SEAM_ANALYZE:
             status = "Video Seam: Analyze Only; decoded frames and audio are unchanged."
