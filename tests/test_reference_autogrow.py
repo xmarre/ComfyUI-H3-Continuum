@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 
+import pytest
 import torch
 
 from ComfyUI_H3_Continuum_Join.reference import (
@@ -9,7 +10,10 @@ from ComfyUI_H3_Continuum_Join.reference import (
     prepare_reference_assets,
     validate_reference_prompts,
 )
-from ComfyUI_H3_Continuum_Join.v3.nodes import H3ContinuumSamplerProduction
+from ComfyUI_H3_Continuum_Join.v3.nodes import (
+    H3ContinuumSamplerProduction,
+    _validate_reference_checkpoint,
+)
 
 
 def test_reference_assets_accept_eight_images_in_connection_order():
@@ -77,3 +81,40 @@ def test_production_sampler_declares_and_accepts_all_eight_reference_inputs():
         parameter.kind is inspect.Parameter.VAR_KEYWORD
         for parameter in signature.parameters.values()
     )
+
+
+def _checkpoint_prompt(filename: str):
+    return {
+        "sampler": {
+            "class_type": "H3ContinuumSamplerProduction",
+            "inputs": {"model": ["loader", 0]},
+        },
+        "loader": {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": filename},
+        },
+    }
+
+
+def test_reference_checkpoint_rejects_fl2va_only_for_reference_images():
+    fl2va_prompt = _checkpoint_prompt("MiniMax-H3-FL2VA.safetensors")
+    with pytest.raises(ValueError, match="Reference Images require a Ref2VA checkpoint"):
+        _validate_reference_checkpoint(
+            fl2va_prompt,
+            "sampler",
+            strict_compatibility=True,
+            reference_images=True,
+        )
+
+    assert _validate_reference_checkpoint(
+        fl2va_prompt,
+        "sampler",
+        strict_compatibility=True,
+        reference_images=False,
+    ) == "fl2va"
+    assert _validate_reference_checkpoint(
+        _checkpoint_prompt("MiniMax-H3-Ref2VA.safetensors"),
+        "sampler",
+        strict_compatibility=True,
+        reference_images=True,
+    ) == "ref2va"
