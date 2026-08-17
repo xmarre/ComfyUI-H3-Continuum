@@ -83,15 +83,17 @@ def _resolve_image_output_device(
         return torch.device("cpu")
 
     first_tensor = next((item for item in images if torch.is_tensor(item)), None)
+    if first_tensor is None:
+        raise ValueError("decoded images contain no IMAGE tensors")
     cuda_device = (
         first_tensor.device
-        if first_tensor is not None and first_tensor.device.type == "cuda"
+        if first_tensor.device.type == "cuda"
         else torch.device("cuda")
     )
     if preference == IMAGE_OUTPUT_CUDA:
         return cuda_device
 
-    if first_tensor is not None and first_tensor.device.type == "cuda":
+    if first_tensor.device.type == "cuda":
         return cuda_device
 
     try:
@@ -415,6 +417,13 @@ class H3ContinuumAssembleV3:
                         ),
                     },
                 ),
+                "diagnostics": (
+                    DIAGNOSTICS_OPTIONS,
+                    {
+                        "default": DIAGNOSTICS_OPTIONS[0],
+                        "display_name": "Report Detail",
+                    },
+                ),
                 "image_output_device": (
                     IMAGE_OUTPUT_DEVICE_OPTIONS,
                     {
@@ -425,13 +434,6 @@ class H3ContinuumAssembleV3:
                             "conservative headroom fits. CUDA is useful after high-resolution "
                             "latent upscaling because it avoids a second full-video CPU buffer."
                         ),
-                    },
-                ),
-                "diagnostics": (
-                    DIAGNOSTICS_OPTIONS,
-                    {
-                        "default": DIAGNOSTICS_OPTIONS[0],
-                        "display_name": "Report Detail",
                     },
                 ),
             }
@@ -491,6 +493,7 @@ class H3ContinuumAssembleSeamExperimental(H3ContinuumAssembleV3):
         schema = super().INPUT_TYPES()
         required = dict(schema["required"])
         diagnostics = required.pop("diagnostics")
+        image_output_device = required.pop("image_output_device")
         required["video_seam"] = (
             VIDEO_SEAM_ANALYSIS_OPTIONS,
             {
@@ -504,6 +507,7 @@ class H3ContinuumAssembleSeamExperimental(H3ContinuumAssembleV3):
             },
         )
         required["diagnostics"] = diagnostics
+        required["image_output_device"] = image_output_device
         schema["required"] = required
         return schema
 
