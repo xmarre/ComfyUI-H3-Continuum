@@ -52,14 +52,23 @@ def _validate_regenerate_storage(run_storage: str, regenerate_from: int) -> None
 
 
 def _validate_reference_checkpoint(
-    prompt, unique_id, *, strict_compatibility: bool
+    prompt,
+    unique_id,
+    *,
+    strict_compatibility: bool,
+    reference_images: bool = False,
 ) -> str:
-    from ..graph_contract import classify_h3_checkpoint
+    from ..graph_contract import CHECKPOINT_FL2VA, classify_h3_checkpoint
 
-    # Checkpoint choice is diagnostic only. Strict Compatibility remains
-    # reserved for H3 contracts that are actually unsafe or unsupported.
+    # Unknown/wrapped checkpoints remain diagnostic-only. A positively identified
+    # FL2VA checkpoint is a known incompatible contract for Reference Images.
     _ = strict_compatibility
-    return classify_h3_checkpoint(prompt, unique_id)
+    checkpoint = classify_h3_checkpoint(prompt, unique_id)
+    if reference_images and checkpoint == CHECKPOINT_FL2VA:
+        raise ValueError(
+            "Reference Images require a Ref2VA checkpoint; FL2VA is incompatible"
+        )
+    return checkpoint
 
 
 class H3ContinuumAdvancedV3:
@@ -536,6 +545,11 @@ class H3ContinuumSamplerProduction(H3ContinuumSamplerV3):
                 "reference_image_1": ("IMAGE",),
                 "reference_image_2": ("IMAGE",),
                 "reference_image_3": ("IMAGE",),
+                "reference_image_4": ("IMAGE",),
+                "reference_image_5": ("IMAGE",),
+                "reference_image_6": ("IMAGE",),
+                "reference_image_7": ("IMAGE",),
+                "reference_image_8": ("IMAGE",),
                 "reference_audio_1": ("AUDIO",),
                 "reference_audio_vae": ("VAE",),
             },
@@ -579,6 +593,11 @@ class H3ContinuumSamplerProduction(H3ContinuumSamplerV3):
         prompt=None,
         unique_id=None,
         reference_image_3=None,
+        reference_image_4=None,
+        reference_image_5=None,
+        reference_image_6=None,
+        reference_image_7=None,
+        reference_image_8=None,
         reference_audio_1=None,
         reference_audio_vae=None,
         timeline_video_source=None,
@@ -596,6 +615,11 @@ class H3ContinuumSamplerProduction(H3ContinuumSamplerV3):
             output_height=int(height),
             size_mode=reference_size,
             reference_image_3=reference_image_3,
+            reference_image_4=reference_image_4,
+            reference_image_5=reference_image_5,
+            reference_image_6=reference_image_6,
+            reference_image_7=reference_image_7,
+            reference_image_8=reference_image_8,
         )
         reference_audio_source = prepare_reference_audio_source(
             reference_audio_1,
@@ -611,6 +635,7 @@ class H3ContinuumSamplerProduction(H3ContinuumSamplerV3):
                 prompt,
                 unique_id,
                 strict_compatibility=bool(strict_compatibility),
+                reference_images=reference_assets is not None,
             )
 
         def report_with_reference_status(report):
