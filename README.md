@@ -27,7 +27,7 @@ Turbo weights are available from [LightX2V MiniMax H3 Turbo](https://huggingface
 - Raw paired video/audio latent continuation without decode/re-encode between chunks.
 - One production sampler UI with normal controls first and infrequent controls marked Advanced.
 - T2VA, First Frame, Last Frame, First + Last Frame, and Reference conditioning.
-- Up to three active Reference images across every chunk, compacted in Core connection order.
+- Up to eight active Reference images across every chunk, compacted in Core connection order; reference inputs auto-expand as they are connected.
 - One native Reference Audio item across every chunk.
 - Disk-backed Run Storage with automatic resume and compatible Revision reuse.
 - Fixed, List, and Timeline prompts through one Sequence Prompt input.
@@ -92,7 +92,8 @@ MiniMax H3 Video VAE -------------> video_vae
 Sampler --------------------------> sampler
 Sigmas ---------------------------> sigmas
 Text (Multiline) -----------------> Sequence Prompt
-Optional images ------------------> first_frame / last_frame / reference_image_1/2/3
+Optional keyframes ---------------> first_frame / last_frame
+Optional references -------------> reference_image_1 ... reference_image_8
 
 video_latents --> Core VAE Decode -----------+
 audio_latents --> Core VAE Decode Audio -----+--> H3 Continuum Assemble V3
@@ -115,11 +116,11 @@ The sampler selects the mode from connected image inputs.
 | First Frame | I2VA + Continuation |
 | Last Frame | Last-frame-conditioned + Continuation |
 | First + Last Frame | FL2VA + Continuation |
-| Reference 1, optionally Reference 2 and 3 | Reference + Continuation |
+| One to eight Reference images | Reference + Continuation |
 
-Reference images and First/Last Frame are mutually exclusive. Active Reference inputs are compacted in Core connection order; bypassed sockets are ignored.
+Reference images and First/Last Frame are mutually exclusive. They are separate H3 conditioning modes. Use the FL2VA model family for First/Last Frame workflows and the Ref2VA family for Reference workflows. Continuum does not classify or reject MODEL filenames and never switches MODELs automatically.
 
-Reference Image 1, 1+2, or 1+2+3 may be connected. A single active image is treated as Picture 1, and active images are numbered without gaps. **Ref2VA** is the reference-specialized checkpoint and may provide stronger reference fidelity, while **FL2VA + Reference** is also allowed. Checkpoint classification is diagnostic only; the sampler never switches MODELs automatically. **Strict Compatibility** remains reserved for H3 contracts that are actually unsafe or unsupported.
+The node begins with Reference Image 1-3 visible. Connecting the highest exposed Reference input adds the next socket automatically, one at a time, up to Reference Image 8. Disconnecting trailing references removes unused dynamic tail sockets while preserving every connected socket. Active Reference inputs are compacted in connection order; bypassed or absent sockets are ignored, so active images are always numbered contiguously as Picture 1..N.
 
 Reference prompts should identify the images explicitly:
 
@@ -129,7 +130,7 @@ Reference prompts should identify the images explicitly:
 <Picture 3> optionally defines another ordered identity, object, or environment reference.
 ```
 
-Reference images persist across all Continuum chunks.
+The same numbering continues through `<Picture 8>` when more references are connected. Reference images persist across all Continuum chunks.
 
 ### Reference Size
 
@@ -156,14 +157,15 @@ Recommended safe defaults:
 | Continuity | Balanced - 22 frames |
 | Audio Continuity | On |
 | Audio Seam | Auto |
-| Report Detail | Basic |
 | Regenerate From | Auto |
 | Run Storage | Off for short tests; Save + Auto Resume for long runs |
 | SageAttention | Auto when backend compatibility is unknown |
 
 ## H3 Continuum Sampler UI
 
-The production node keeps normal generation controls visible and marks infrequent controls as native ComfyUI **Advanced** widgets. Most users only need the main controls.
+The V3.3 production node keeps normal generation controls visible and moves developer-only options to ComfyUI Settings. Connection-specific controls appear only when the related input or Run Storage mode is active.
+
+![H3 Continuum V3.3 streamlined sampler and assembler](docs/images/h3-continuum-v33-streamlined-ui.png)
 
 ### Main inputs and controls
 
@@ -172,7 +174,7 @@ The production node keeps normal generation controls visible and marks infrequen
 | H3 pipeline | `model`, `clip`, `video_vae`, `sampler`, `sigmas` | Connect the normal MiniMax H3 MODEL, text encoder, Video VAE, sampler, and sigma schedule. |
 | Prompt | `Sequence Prompt` | Fixed, List, or Timeline text for the complete Continuum run. |
 | Keyframes | `first_frame`, `last_frame` | Optional I2VA, last-frame-conditioned, or FL2VA keyframes. |
-| Reference images | `reference_image_1`, `reference_image_2`, `reference_image_3` | Up to three ordered Picture references. Bypassed inputs are ignored. |
+| Reference images | `reference_image_1` ... `reference_image_8` | Up to eight ordered Picture references. Inputs auto-expand from the first three as references are connected; bypassed inputs are ignored. |
 | Reference audio | `reference_audio_1`, `reference_audio_vae` | Optional native H3 Reference Audio. Connect the Audio VAE only when Reference Audio is used. |
 | Duration | `chunks`, `chunk_seconds` | Number of linked chunks and duration of each chunk. Start with `3 x 5.0` seconds. |
 | Canvas | `width`, `height` | Output dimensions. Use values compatible with the current H3 Core path, normally multiples of 32. |
@@ -187,15 +189,26 @@ Reference images and First/Last Frame are mutually exclusive. Reference Audio ca
 | --- | --- | --- |
 | Prompt Format | Auto | Detect Fixed, List, or Timeline prompts. |
 | Audio Continuity | On | Carry raw audio context between chunks. |
-| Report Detail | Basic | Select the amount of status and diagnostic text. |
-| Regenerate From | Auto | Resume normally, or regenerate from a selected saved chunk. |
-| `reroll_nonce` | 0 | Automatic Revision behavior. Positive values provide explicit legacy branch selection. |
-| Strict Compatibility | On | Stop only on H3 contracts that are actually unsafe or unsupported. |
-| Debug | Off | Enable additional troubleshooting output. |
-| Show Preview | On | Show normal progress and preview information. |
 | Run Storage | Off | Use `Save + Auto Resume` for long or interruptible runs. |
-| Run Name | blank | Optional manual storage-name override. Automatic identification is used when blank. |
-| Reference Size | Match Output | Choose practical output-area matching or larger identity preservation. |
+| Run Name | blank | Appears with `Save + Auto Resume`; optionally overrides the automatic storage identity. |
+| Regenerate From | Auto | Appears with `Save + Auto Resume`; reuse normally or regenerate from a selected saved chunk. |
+| Variation Nonce | 0 | Appears only for explicit chunk regeneration and creates a deliberate alternate revision. |
+| Reference Size | Match Output | Appears when a Reference Image is connected. |
+| Timeline Video Size | Efficient - 0.4 MP | Appears when Timeline Video is connected. |
+
+### ComfyUI settings
+
+The following package-wide options are available in ComfyUI Settings instead of occupying every sampler and assembler node:
+
+![H3 Continuum settings](docs/images/h3-continuum-v33-settings.png)
+
+| Setting | Default | Use |
+| --- | --- | --- |
+| H3 Continuum: Sampling Preview | On | Show normal sampling preview/progress information. |
+| H3 Continuum: Developer Diagnostics | Off | Enable developer-oriented diagnostics when troubleshooting. |
+| H3 Continuum: Detailed Report | Off | Expand sampler and assembly status text. Normal generation does not require it. |
+
+These settings are applied when the workflow is queued. Hidden legacy widgets remain compatible with older saved workflows, while unknown or merged MODEL filenames are not rejected by name.
 
 ### Outputs
 
@@ -246,6 +259,60 @@ Natural ending.
 
 `Prompt Format = Auto` detects Fixed, List, or Timeline syntax.
 
+### Local LLM / Qwen prompt generation
+
+MiniMax provides the official [H3 prompt-writing skill](https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing) for T2VA, I2VA, FL2VA, L2VA, and Ref2VA. Give a local agent the complete `h3-prompt-writing` folder, not only `SKILL.md`, because the detailed formats and examples are stored under `references/`.
+
+The official skill defines the H3 prompt fields and reference-label rules. H3 Continuum adds one routing requirement: divide the visual progression into one prompt section per Continuum chunk. The currently validated workflow uses 5-second chunks.
+
+For reliable output, use `Prompt Format = Timeline` or `Auto` and require:
+
+- exactly one non-empty section per configured chunk;
+- sequential ranges such as `[0-5s]`, `[5-10s]`, and `[10-15s]`;
+- shared Ref2VA subject and reference definitions only once, before the first timeline section;
+- only labels for active connected inputs, using compact Core numbering;
+- a different action, camera, and scene progression for each section;
+- no explanatory text outside the final H3 prompt.
+
+If fewer usable sections are produced, Continuum may reuse the previous available section. Matching the requested chunk count is therefore strongly recommended.
+
+Copy-paste system instruction for a local LLM:
+
+```text
+You write production prompts for ComfyUI-H3-Continuum V3.3.
+
+Use the complete official MiniMax H3 prompt-writing skill as the authority for
+T2VA, I2VA, FL2VA, L2VA, and Ref2VA field order, syntax, and reference labels.
+
+The user will provide:
+- generation mode;
+- chunk count;
+- seconds per chunk;
+- active image, video, and audio inputs;
+- scene requirements.
+
+Output rules:
+1. Output only the final H3 prompt. Do not add explanations or Markdown fences.
+2. Produce exactly one non-empty Timeline section per requested chunk.
+3. Use sequential headers calculated from the supplied chunk duration. For three
+   5-second chunks, use exactly [0-5s], [5-10s], and [10-15s].
+4. Every section must describe the action, camera movement, scene progression,
+   and relevant sound for that interval. Continue naturally from the previous
+   section; do not repeat the first section.
+5. Mention only active connected references. Number Picture, Video, and Audio
+   labels compactly in ComfyUI Core order. Never mention bypassed, missing, or
+   unconnected inputs.
+6. For Ref2VA, write subject_definitions, summary, and retention_analysis once
+   before the first Timeline header. In each Timeline section, provide that
+   chunk's detailed_description, overall_soundscape, and non_diegetic_music.
+7. For T2VA, I2VA, FL2VA, and L2VA, each Timeline section must contain the
+   official integrated_multimodal_description, overall_soundscape, and
+   non_diegetic_music structure for that chunk.
+8. Preserve requested dialogue, lyrics, and visible text verbatim and in their
+   requested language. Follow the official H3 dialogue and reference syntax.
+9. Do not claim guaranteed frame-perfect continuity or exact audio copying.
+```
+
 ## Run Storage and automatic resume
 
 For long generations:
@@ -295,7 +362,7 @@ Select `Chunk N` in `Regenerate From` to reuse chunks before N and regenerate N 
 
 ## Spectrum-aware continuation
 
-With a compatible [ComfyUI Spectrum MiniMax H3](https://github.com/xmarre/ComfyUI-Spectrum-MiniMax-H3), Continuum requests **Actual Prefix 2** for continuation chunks through Interop API v1. Upstream integration is currently pending in [PR #52](https://github.com/xmarre/ComfyUI-Spectrum-MiniMax-H3/pull/52); until it is merged, use the validated PR/Fork receiver and confirm the acceptance log below.
+With [ComfyUI Spectrum MiniMax H3](https://github.com/xmarre/ComfyUI-Spectrum-MiniMax-H3), Continuum requests **Actual Prefix 2** for continuation chunks through Interop API v1. First-class H3 Continuum API v1 interoperability is included upstream in Spectrum v0.2.15 and later, so a current standard Spectrum installation can receive this request without a separate fork. Confirm the acceptance log below during runtime validation.
 
 ```text
 Chunk 1: normal path
@@ -314,9 +381,9 @@ Spectrum H3: accepted H3 Continuum API v1, actual prefix=2
 
 Actual Prefix 2 is active only when the Spectrum log reports that the Continuum API request was accepted. Older or incompatible Spectrum versions continue without that receiver behavior.
 
-### Benefits after the Spectrum upstream merge
+### Benefits of the upstream Spectrum integration
 
-Once the Continuum receiver is included in an official Spectrum release, users no longer need a Continuum-specific Spectrum fork or local patch. Installing or updating Spectrum through its normal distribution path will preserve the integration.
+The Continuum receiver is included in the official Spectrum release, so users no longer need a Continuum-specific Spectrum fork or local patch. Installing or updating Spectrum through its normal distribution path preserves the integration.
 
 - **Automatic handshake:** Continuum emits the request only for continuation chunks, and Spectrum applies Actual Prefix 2 when it recognizes Interop API v1.
 - **Safer chunk transitions:** the first two Transformer evaluations after a new raw AV Context are evaluated normally before Spectrum forecasting resumes. This is intended to reduce forecast instability immediately after a chunk boundary; it does not guarantee that every visible seam or flicker will disappear.
@@ -359,7 +426,7 @@ Turbo LoRA files are available from [LightX2V MiniMax H3 Turbo](https://huggingf
 
 Connect decoded chunk images, audio, and `assembly_plan` to `H3 Continuum Assemble + Seam`.
 
-- Default: `Audio Seam = Auto`, `Video Seam = Auto`, `Report Detail = Basic`.
+- Default: `Audio Seam = Auto`, `Video Seam = Auto`.
 - Video modes: `Auto`, `Auto 2`, `Analyze Only`, `Off`.
 - `Auto` applies guarded transient and micro-flash correction without frame deletion.
 - `Auto 2` additionally enables guarded exposure-ramp correction and remains experimental.
@@ -394,7 +461,7 @@ resume=complete
 
 `accelerator markers not detected (informational only)` is not an error. It only means the optional accelerator marker was not observable.
 
-Use `Report Detail = Basic` normally. Enable detailed diagnostics and `debug` only when troubleshooting.
+Keep **Detailed Report** and **Developer Diagnostics** disabled normally. Enable them in ComfyUI Settings only when troubleshooting or collecting a diagnostic report.
 
 ## Compatibility and scope
 
