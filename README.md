@@ -203,7 +203,7 @@ Reference images and First/Last Frame are mutually exclusive. Reference Audio ca
 | Output | Connect to |
 | --- | --- |
 | `video_latents` | One normal ComfyUI Core Video VAE Decode node. |
-| `audio_latents` | One normal ComfyUI Core Audio VAE Decode Audio node. |
+| `audio_latents` | One normal ComfyUI Core Audio VAE Decode node. |
 | `assembly_plan` | **H3 Continuum Assemble V3**. |
 | `status` | Core **Preview as Text** when a readable run report is needed. |
 
