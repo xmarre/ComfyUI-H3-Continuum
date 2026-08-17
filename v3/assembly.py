@@ -93,9 +93,8 @@ def _resolve_image_output_device(
     if preference == IMAGE_OUTPUT_CUDA:
         return cuda_device
 
-    if first_tensor.device.type == "cuda":
-        return cuda_device
-
+    # Auto always checks the new output allocation against currently free VRAM,
+    # including when decoded inputs themselves are already resident on CUDA.
     try:
         free_bytes, total_bytes = torch.cuda.mem_get_info(cuda_device)
     except Exception:
@@ -277,9 +276,9 @@ def assemble_decoded_chunks(
         elif tuple(segment_images.shape[1:]) != tuple(image_buffer.shape[1:]):
             raise ValueError(f"decoded image geometry changed at chunk {index}")
 
-        image_buffer[frame_cursor:frame_stop].copy_(
-            segment_images.to(device=image_buffer.device, dtype=image_buffer.dtype)
-        )
+        # copy_ supports CPU<->CUDA directly, so do not first materialize a full
+        # retained-chunk CUDA temporary with segment_images.to(device=...).
+        image_buffer[frame_cursor:frame_stop].copy_(segment_images)
         _apply_video_patch(
             image_buffer,
             frame_start=frame_cursor,
