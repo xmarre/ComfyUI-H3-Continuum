@@ -11,8 +11,14 @@ WEB_DIRECTORY = "./web"
 # intentionally not a unit-test dependency.
 if __package__:
     from .nodes import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+    from .reference_precedence import install_reference_frame_precedence
     from .temporal import run_temporal_self_test
     from .version import PACKAGE_VERSION
+
+    # Saved V3.2/V3.3 production node IDs remain loadable. Keep them aligned
+    # with V3.4's Reference-mode precedence so stale First/Last connections
+    # cannot leak into reference-conditioned generations.
+    install_reference_frame_precedence(NODE_CLASS_MAPPINGS)
 
     try:
         run_temporal_self_test()
