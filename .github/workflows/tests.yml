@@ -84,8 +84,10 @@ jobs:
               prefix + "pyproject.toml",
               prefix + "v2/sequence.py",
               prefix + "v3/nodes.py",
+              prefix + "v3/driving_nodes.py",
               prefix + "web/project_id.js",
               prefix + "web/reference_autogrow.js",
+              prefix + "web/v34_ui.js",
           }
           with zipfile.ZipFile(os.environ["ARCHIVE"]) as archive:
               names = set(archive.namelist())
@@ -101,6 +103,7 @@ jobs:
         run: |
           node --check web/project_id.js
           node --check web/reference_autogrow.js
+          node --check web/v34_ui.js
 
       - name: Compile Python
         run: python -m compileall -q .

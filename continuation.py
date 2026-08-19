@@ -8,10 +8,7 @@ import torch
 
 from .constants import (
     CONTINUUM_INTEROP_API,
-    CONTINUUM_REFERENCE_AUDIO_ROLE_AUDIO_CONTEXT,
     CONTINUUM_REFERENCE_METADATA_KEY,
-    CONTINUUM_REFERENCE_PRESERVE_ROPE_KEY,
-    CONTINUUM_REFERENCE_ROLE_VIDEO_CONTEXT,
     MARK_AUDIO_CONTEXT,
     MARK_AUDIO_END_FRAME,
     MARK_AUDIO_OVERHANG,
@@ -97,16 +94,9 @@ def prepare_conditioning(
         MARK_CONTEXT_FRAMES: int(context_frames),
         CONTINUUM_REFERENCE_METADATA_KEY: {
             "api": CONTINUUM_INTEROP_API,
-            "role": CONTINUUM_REFERENCE_ROLE_VIDEO_CONTEXT,
-            "audio_role": (
-                CONTINUUM_REFERENCE_AUDIO_ROLE_AUDIO_CONTEXT
-                if audio_context is not None
-                else None
-            ),
-            # Continuum uses this native ref as a temporal/geometric anchor for
-            # the next chunk. External RoPE/frequency patches should preserve its
-            # native positional treatment unless the user explicitly opts in.
-            CONTINUUM_REFERENCE_PRESERVE_ROPE_KEY: True,
+            "role": "video_context",
+            "audio_role": "audio_context" if audio_context is not None else None,
+            "preserve_rope": True,
         },
     }
     if audio_context is not None:
@@ -144,9 +134,9 @@ def prepare_conditioning(
             elif is_last:
                 continue
             else:
-                raise ValueError(
-                    f"unsupported existing H3 keyframe index {frame_index}; only first/last are safe"
-                )
+                # Core H3 accepts arbitrary guide positions. Preserve them and
+                # let the native keyframe/layout path decide their semantics.
+                kept.append(keyframe)
         if kept:
             metadata["minimax_keyframes"] = kept
         else:

@@ -1,14 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Fixed exact-duration tail freezes by ensuring the final Continuum chunk never undershoots the requested cumulative frame count; surplus native H3 frames are trimmed instead of repeating the last decoded frame.
-- Reject legacy or malformed under-length V3 assembly plans and regenerate undersized cached final chunks instead of synthesizing a frozen tail.
-- Restored compatibility with ComfyUI #15439, which removed the legacy `PackedLayout.frame_count` keyword and made native H3 keyframe placement target-relative.
-- Normalized keyframe coordinates semantically so pre-#15439 text-relative layouts and current target-relative layouts both land on the same target timeline without double-shifting.
-- Added current-Core `cond_audio` keyframe handling and preserved audio keyframe latents when mixed with Continuum reference context.
-- Kept V1 First/Last Frame continuation working after Core stopped publishing `minimax_frame_count` by using the source H3 latent length as the authoritative fallback; arbitrary guide positions still fail closed.
-
 ## 3.3.0
 
 - Promoted Timeline Video to a stable public node with chunk-local slicing and a 0.4 MP default.

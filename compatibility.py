@@ -79,10 +79,6 @@ def check_comfy_h3_runtime() -> list[str]:
                     "latent_w",
                     "audio_t",
                 ),
-                # ComfyUI #15439 removed ``frame_count`` from PackedLayout.
-                # Continuum requires only the stable keyframe/reference inputs;
-                # older cores may still expose frame_count as an optional legacy
-                # keyword and remain supported.
                 keywords=(
                     "keyframes",
                     "refs",
@@ -173,9 +169,9 @@ def run_native_layout_self_test() -> str:
         MARK_AUDIO_END_FRAME: 5.0,
         MARK_AUDIO_OVERHANG: -1.0 / 3.0,
     }
-    # This refs-only probe intentionally uses the common constructor
-    # contract shared by pre- and post-#15439 ComfyUI revisions.
-    layout = h3_model.PackedLayout(3, 7, 2, 2, 10, keyframes=None, refs=[ref])
+    layout = h3_model.PackedLayout(
+        3, 7, 2, 2, 10, keyframes=None, refs=[ref]
+    )
     position_id = id(layout.position_ids)
     payload = {"layout": layout, "keyframes": [], "refs": [ref]}
     normalize_condition_latents(payload)
@@ -199,9 +195,6 @@ def ensure_native_h3_base_model(base_model: Any) -> None:
     inner = getattr(base_model, "diffusion_model", None)
     if inner is None:
         raise CompatibilityError("MODEL does not expose diffusion_model")
-    actual = f"{type(inner).__module__}.{type(inner).__name__}"
-    if actual != "comfy.ldm.minimax.model.MiniMaxH3Model":
-        raise CompatibilityError(f"native MiniMaxH3Model required; got {actual}")
     missing = [
         name
         for name in (
@@ -215,8 +208,10 @@ def ensure_native_h3_base_model(base_model: Any) -> None:
         if not hasattr(inner, name)
     ]
     if missing:
+        actual = f"{type(inner).__module__}.{type(inner).__name__}"
         raise CompatibilityError(
-            "MiniMaxH3Model contract changed; missing " + ", ".join(missing)
+            f"MiniMax H3 model contract is unavailable on {actual}; missing "
+            + ", ".join(missing)
         )
 
 

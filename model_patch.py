@@ -37,7 +37,14 @@ def _wrapper_factory(*, strict: bool, debug: bool) -> Callable[..., Any]:
         if not has_continuum and not has_mixed_keyframe_refs:
             return executor(*args, **kwargs)
         try:
-            ensure_native_h3_base_model(executor.class_obj)
+            try:
+                ensure_native_h3_base_model(executor.class_obj)
+            except CompatibilityError as exc:
+                logging.getLogger(__name__).warning(
+                    "H3 Continuum could not pre-classify this model; continuing with "
+                    "ComfyUI runtime validation: %s",
+                    exc,
+                )
             patched_payload = dict(payload)
             if has_continuum:
                 patch_layout_in_place(patched_payload, strict=True, debug=debug)
@@ -51,9 +58,9 @@ def _wrapper_factory(*, strict: bool, debug: bool) -> Callable[..., Any]:
                 )
                 input_x = args[0] if args else None
                 materialize_continuum_latents(patched_payload, input_x, debug=debug)
-            # Core revisions differ in how mixed keyframe/reference latent
-            # lists are assembled. Rebuild them deterministically, including
-            # post-#15439 audio-bearing keyframes.
+            # ComfyUI Core 0.33.1 replaces keyframe condition latents with
+            # reference latents when both contracts are present. Rebuild the
+            # combined list for First/Last Frame + standalone Reference Audio.
             normalize_condition_latents(patched_payload)
             kwargs["minimax_payload"] = patched_payload
         except (CompatibilityError, LayoutCompatibilityError, KeyError, TypeError, ValueError) as exc:
@@ -77,7 +84,14 @@ def configure_continuum_model(model: Any, *, strict: bool, debug: bool):
     base_model = getattr(model, "model", None)
     if base_model is None:
         raise RuntimeError("MODEL does not expose the ComfyUI BaseModel")
-    ensure_native_h3_base_model(base_model)
+    try:
+        ensure_native_h3_base_model(base_model)
+    except CompatibilityError as exc:
+        logging.getLogger(__name__).warning(
+            "H3 Continuum could not pre-classify this model; installing the wrapper "
+            "and deferring compatibility to ComfyUI runtime validation: %s",
+            exc,
+        )
     patched = model
     patched.remove_wrappers_with_key(WrappersMP.APPLY_MODEL, MODEL_WRAPPER_KEY)
     patched.add_wrapper_with_key(
