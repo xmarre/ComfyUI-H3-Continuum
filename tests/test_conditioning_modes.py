@@ -13,6 +13,9 @@ from ComfyUI_H3_Continuum_Join.conditioning import (
         (False, True, False, "last_only"),
         (True, True, False, "fl2va"),
         (False, False, True, "reference"),
+        (True, False, True, "reference"),
+        (False, True, True, "reference"),
+        (True, True, True, "reference"),
     ],
 )
 def test_conditioning_mode_matrix(
@@ -23,16 +26,3 @@ def test_conditioning_mode_matrix(
         has_last=has_last,
         has_reference=has_reference,
     ) == expected
-
-
-@pytest.mark.parametrize(
-    ("has_first", "has_last"),
-    [(True, False), (False, True), (True, True)],
-)
-def test_reference_rejects_first_or_last_frame(has_first, has_last):
-    with pytest.raises(ValueError, match="cannot be combined"):
-        conditioning_mode_from_presence(
-            has_first=has_first,
-            has_last=has_last,
-            has_reference=True,
-        )
