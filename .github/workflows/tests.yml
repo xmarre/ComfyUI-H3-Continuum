@@ -36,10 +36,41 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install --index-url https://download.pytorch.org/whl/cpu torch
-          python -m pip install -r requirements.txt numpy safetensors pytest ruff build
+          python -m pip install -r requirements.txt numpy safetensors pytest ruff
 
-      - name: Validate package build
-        run: python -m pip wheel --no-deps --wheel-dir /tmp/h3-continuum-wheel .
+      - name: Validate project metadata and release archive
+        shell: bash
+        run: |
+          version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid project version: ${version}" >&2
+            exit 1
+          fi
+          archive="/tmp/ComfyUI-H3-Continuum-v${version}.zip"
+          git archive \
+            --format=zip \
+            --prefix="ComfyUI-H3-Continuum-v${version}/" \
+            --output="${archive}" \
+            HEAD
+          ARCHIVE="${archive}" VERSION="${version}" python - <<'PY'
+          import os
+          import zipfile
+
+          prefix = f"ComfyUI-H3-Continuum-v{os.environ['VERSION']}/"
+          required = {
+              prefix + "__init__.py",
+              prefix + "pyproject.toml",
+              prefix + "v2/sequence.py",
+              prefix + "v3/nodes.py",
+              prefix + "web/project_id.js",
+              prefix + "web/reference_autogrow.js",
+          }
+          with zipfile.ZipFile(os.environ["ARCHIVE"]) as archive:
+              names = set(archive.namelist())
+          missing = sorted(required - names)
+          if missing:
+              raise SystemExit(f"release archive is missing required files: {missing}")
+          PY
 
       - name: Run targeted Ruff checks
         run: python -m ruff check . --select E9,F63,F7,F82
