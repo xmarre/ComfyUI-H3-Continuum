@@ -61,18 +61,32 @@ jobs:
           )"
 
           parent="$(git rev-parse "${RELEASE_SHA}^")"
-          previous="$(git show "${parent}:pyproject.toml" | python -c '
-          import sys, tomllib
+          previous_file="$(mktemp)"
+          trap 'rm -f "${previous_file}"' EXIT
+          git show "${parent}:pyproject.toml" > "${previous_file}"
+          previous="$(PREVIOUS_PYPROJECT="${previous_file}" python - <<'PY'
+          import os
+          import pathlib
+          import tomllib
+
           from packaging.version import InvalidVersion, Version
-          raw = tomllib.loads(sys.stdin.read())["project"]["version"]
+
+          raw = tomllib.loads(
+              pathlib.Path(os.environ["PREVIOUS_PYPROJECT"]).read_text()
+          )["project"]["version"]
           try:
               parsed = Version(raw)
           except InvalidVersion as exc:
-              raise SystemExit(f"Invalid previous PEP 440 project version: {raw!r}: {exc}") from exc
+              raise SystemExit(
+                  f"Invalid previous PEP 440 project version: {raw!r}: {exc}"
+              ) from exc
           if len(parsed.release) != 3:
-              raise SystemExit(f"Previous project version must have exactly three release components: {raw!r}")
+              raise SystemExit(
+                  f"Previous project version must have exactly three release components: {raw!r}"
+              )
           print(parsed)
-          ')"
+          PY
+          )"
 
           echo "version=${version}" >> "${GITHUB_OUTPUT}"
           echo "tag=v${version}" >> "${GITHUB_OUTPUT}"
