@@ -2,7 +2,9 @@ from types import SimpleNamespace
 
 import torch
 
+from ComfyUI_H3_Continuum_Join.graph_contract import build_upstream_graph_contract
 from ComfyUI_H3_Continuum_Join.nodes import NODE_CLASS_MAPPINGS
+from ComfyUI_H3_Continuum_Join.v3 import driving_nodes
 from ComfyUI_H3_Continuum_Join.v3.assembly import (
     AUDIO_SEAM_OFF,
     H3ContinuumAssembleSeamExperimental,
@@ -41,6 +43,65 @@ def test_v34_sampler_matches_release_contract_and_keeps_eight_reference_capacity
         "driving_audio",
     )
     assert H3ContinuumSamplerV34.OUTPUT_IS_LIST == (True, True, False, False, False)
+
+
+def test_v34_reference_mode_ignores_connected_first_and_last_frames(monkeypatch):
+    captured = {}
+
+    def fake_run(self, *args, **kwargs):
+        captured.update(kwargs)
+        return "ok"
+
+    monkeypatch.setattr(driving_nodes._H3ContinuumSamplerV34, "run", fake_run)
+    result = H3ContinuumSamplerV34().run(
+        first_frame=object(),
+        last_frame=object(),
+        reference_image_1=object(),
+    )
+    assert result == "ok"
+    assert captured["first_frame"] is None
+    assert captured["last_frame"] is None
+    assert captured["reference_image_1"] is not None
+
+
+def test_v34_unknown_serializable_wrapper_is_resume_safe_and_fingerprinted():
+    prompt = {
+        "10": {
+            "class_type": "UNETLoader",
+            "inputs": {"unet_name": "minimax_h3.safetensors"},
+        },
+        "11": {
+            "class_type": "UnknownFutureWrapper",
+            "inputs": {"model": ["10", 0], "strength": 0.75},
+        },
+        "20": {"class_type": "CLIPLoader", "inputs": {"clip_name": "qwen.safetensors"}},
+        "30": {"class_type": "VAELoader", "inputs": {"vae_name": "video_vae.safetensors"}},
+        "42": {
+            "class_type": "H3ContinuumSamplerV34",
+            "inputs": {
+                "model": ["11", 0],
+                "clip": ["20", 0],
+                "video_vae": ["30", 0],
+            },
+        },
+    }
+    graph, safe, reasons = build_upstream_graph_contract(
+        prompt, "42", require_video_vae=True
+    )
+    assert safe, reasons
+    assert graph["routes"]["model"]["node"]["class_type"] == "UnknownFutureWrapper"
+    changed = {
+        **prompt,
+        "11": {
+            "class_type": "UnknownFutureWrapper",
+            "inputs": {"model": ["10", 0], "strength": 0.5},
+        },
+    }
+    changed_graph, changed_safe, changed_reasons = build_upstream_graph_contract(
+        changed, "42", require_video_vae=True
+    )
+    assert changed_safe, changed_reasons
+    assert changed_graph["sha256"] != graph["sha256"]
 
 
 def test_persistent_reference_video_storage_contract_has_one_record_per_chunk():
