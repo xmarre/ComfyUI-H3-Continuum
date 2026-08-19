@@ -33,7 +33,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install release validation dependency
-        run: python -m pip install --disable-pip-version-check packaging
+        run: python -m pip install --disable-pip-version-check 'packaging==25.0'
 
       - name: Detect tested version bump
         id: version
