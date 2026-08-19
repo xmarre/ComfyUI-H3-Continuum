@@ -27,6 +27,11 @@ jobs:
           fetch-depth: 2
           ref: ${{ github.event.workflow_run.head_sha }}
 
+      - name: Set up release Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
       - name: Detect tested version bump
         id: version
         shell: bash
