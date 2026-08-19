@@ -173,7 +173,16 @@ function configureConditionalWidgets(node) {
         setWidgetVisible(nonceWidget, explicitRegeneration);
         setWidgetVisible(
             findWidget(node, REFERENCE_SIZE_WIDGET),
-            linkedInput(node, ["reference_image_1", "reference_image_2", "reference_image_3"]),
+            linkedInput(node, [
+                "reference_image_1",
+                "reference_image_2",
+                "reference_image_3",
+                "reference_image_4",
+                "reference_image_5",
+                "reference_image_6",
+                "reference_image_7",
+                "reference_image_8",
+            ]),
         );
         setWidgetVisible(
             findWidget(node, TIMELINE_SIZE_WIDGET),
