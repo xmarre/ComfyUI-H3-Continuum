@@ -5,6 +5,8 @@ from __future__ import annotations
 from .driving_nodes_impl import (
     H3ContinuumAssembleSeamV34,
     H3ContinuumSamplerV34 as _H3ContinuumSamplerV34,
+    _prompt_graph_with_audio_vae_alias,
+    _reference_video_storage_contract,
 )
 
 
