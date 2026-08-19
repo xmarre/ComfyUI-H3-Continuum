@@ -24,8 +24,6 @@ def _prompt_error(code,reason,*,line_number=None,source=None,suggested_fix):
     raise PromptPlanError("\n".join(lines))
 def prompt_hash(prompt:str)->str: return hashlib.sha256(prompt.encode("utf-8")).hexdigest()
 def _normalize_prompt(value:str,*,label:str)->str:
-    return "" if value is None else str(value)
-def _structured_prompt(value:str)->str:
     return "" if value is None else str(value).strip()
 def _parse_json_list(script:str):
     stripped=script.lstrip()
@@ -33,10 +31,10 @@ def _parse_json_list(script:str):
     try: value=json.loads(script)
     except json.JSONDecodeError: return None
     if not isinstance(value,list) or not all(isinstance(item,str) for item in value): return None
-    return [_structured_prompt(item) for item in value]
+    return [_normalize_prompt(item,label=f"prompt {index+1}") for index,item in enumerate(value)]
 def _parse_list(script,chunks):
     values=_parse_json_list(script)
-    if values is None: values=[_structured_prompt(part) for part in _LIST_SEPARATOR.split(script) if part.strip()]
+    if values is None: values=[_normalize_prompt(part,label=f"prompt {index+1}") for index,part in enumerate(_LIST_SEPARATOR.split(script)) if part.strip()]
     if not values: values=[str(script)]
     notes=[]
     if len(values)<chunks: notes.append(f"repeated the last prompt for {chunks-len(values)} chunk(s)"); values.extend([values[-1]]*(chunks-len(values)))
@@ -58,7 +56,7 @@ def _parse_timeline_sections(script,*,allow_preamble=True):
             body=[]; return
         if not any(line.strip() for line in body):
             _prompt_error("H3C-P005","timeline section body is empty",line_number=current["line_number"],source=current["source"],suggested_fix="add prompt text below this header")
-        prompt=_structured_prompt("\n".join(body))
+        prompt=_normalize_prompt("\n".join(body),label="timeline section")
         current["prompt"]=f"{preamble}\n\n{prompt}" if preamble else prompt
         sections.append(current); current=None; body=[]
     for line_number,line in enumerate(str(script).splitlines(),start=1):
@@ -95,7 +93,7 @@ def validate_sparse_prompt_overrides(overrides,*,chunks):
     for index,prompt in overrides.items():
         if type(index) is not int: raise PromptPlanError("Sparse Clip Override numbers must be integers")
         if not 1<=index<=chunks: raise PromptPlanError(f"Sparse Clip Override {index} is outside the configured 1-{chunks} chunks")
-        validated[index]=_structured_prompt(prompt)
+        validated[index]=_normalize_prompt(prompt,label=f"Clip {index} Override")
     if not validated: raise PromptPlanError("Sparse Clip Overrides contains no overrides")
     return validated
 def _parse_timeline(script,chunks,chunk_seconds):
@@ -192,12 +190,11 @@ def build_sampler_prompt_plan(*,prompt_mode,prompt_script,sequence_prompt,prompt
     if sequence_prompt is not None: return make_prompt_plan(mode=prompt_mode,script=sequence_prompt,chunks=chunks,chunk_seconds=chunk_seconds)
     if prompt_plan is not None:
         plan=validate_prompt_plan(prompt_plan)
-        if int(plan["chunks"])==chunks and abs(float(plan["chunk_seconds"])-chunk_seconds)<=1e-6: return plan
         prompts=list(plan["prompts"])
         if len(prompts)<chunks: prompts.extend([prompts[-1] if prompts else ""]*(chunks-len(prompts)))
         elif len(prompts)>chunks: prompts=prompts[:chunks]
         result=dict(plan); result["chunks"]=chunks; result["chunk_seconds"]=chunk_seconds; result["prompts"]=prompts; result["hashes"]=[prompt_hash(p) for p in prompts]
-        result["notes"]=list(plan.get("notes") or [])+["adapted connected prompt plan to Sampler chunk settings"]
+        if int(plan["chunks"])!=chunks or abs(float(plan["chunk_seconds"])-chunk_seconds)>1e-6: result["notes"]=list(plan.get("notes") or [])+["adapted connected prompt plan to Sampler chunk settings"]
         return validate_prompt_plan(result)
     return make_prompt_plan(mode=prompt_mode,script=prompt_script,chunks=chunks,chunk_seconds=chunk_seconds)
 def apply_prompt_overrides(plan,overrides):

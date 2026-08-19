@@ -83,9 +83,9 @@ jobs:
               prefix + "__init__.py",
               prefix + "pyproject.toml",
               prefix + "v2/sequence.py",
+              prefix + "v2/context_diagnostics.py",
               prefix + "v3/nodes.py",
               prefix + "v3/driving_nodes.py",
-              prefix + "v3/driving_nodes_impl.py",
               prefix + "web/project_id.js",
               prefix + "web/v34_ui.js",
           }
@@ -94,6 +94,8 @@ jobs:
           missing = sorted(required - names)
           if missing:
               raise SystemExit(f"release archive is missing required files: {missing}")
+          if prefix + "v3/driving_nodes_impl.py" in names:
+              raise SystemExit("release archive unexpectedly contains obsolete v3/driving_nodes_impl.py")
           PY
 
       - name: Run targeted Ruff checks

@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import torch
 
+from ..constants import FPS
+from ..driving_audio import prepare_driving_audio_source
+from ..reference import bundle_reference_images
 from ..reference_video import (
     REFERENCE_VIDEO_SIZE_EFFICIENT,
     REFERENCE_VIDEO_SIZE_OPTIONS,
 )
 from ..v2.decoder import enforce_total_frames
 from .assembly import H3ContinuumAssembleSeamExperimental
-from .driving_nodes_impl import H3ContinuumSamplerV34 as _V34RuntimeSampler
 from .nodes import CATEGORY as CONTINUUM_CATEGORY, H3ContinuumSamplerProduction
 
 
@@ -139,34 +141,61 @@ class H3ContinuumSamplerV34(H3ContinuumSamplerProduction):
         video_reference_size=REFERENCE_VIDEO_SIZE_EFFICIENT,
         **kwargs,
     ):
-        # V3.4's conditioning resolver gives Reference Images precedence over
-        # First/Last keyframes. Keep that behavior scoped to the V3.4 facade so
-        # legacy V3.3 workflows retain their historical validation semantics.
-        if any(
+        from ..reference_video import prepare_reference_video_source
+        from ..temporal import align_frame_count_up
+
+        active_reference = any(
             kwargs.get(f"reference_image_{index}") is not None
             for index in range(1, 9)
-        ):
+        )
+        if active_reference:
+            # V3.4 follows Core-style mode precedence: Reference mode wins over
+            # connected First/Last inputs rather than rejecting the combination.
             kwargs["first_frame"] = None
             kwargs["last_frame"] = None
 
-        # The V3.4 hotfix restored this public facade, but the released base
-        # sampler still has no driving_audio_source/reference_video_source
-        # parameters. Delegate only the execution path to the tested V3.4
-        # runtime bridge while keeping this official public schema authoritative.
-        outputs = _V34RuntimeSampler().run(
-            driving_audio=driving_audio,
-            audio_vae=audio_vae,
-            reference_video_1=reference_video_1,
-            video_reference_size=video_reference_size,
+        extra_references = [
+            kwargs.pop(f"reference_image_{index}", None)
+            for index in range(4, 9)
+        ]
+        if any(image is not None for image in extra_references):
+            kwargs["reference_image_3"] = bundle_reference_images(
+                kwargs.get("reference_image_3"),
+                *extra_references,
+            )
+
+        target_frames = round(
+            int(kwargs["chunks"]) * float(kwargs["chunk_seconds"]) * FPS
+        )
+        source = prepare_driving_audio_source(
+            driving_audio,
+            audio_vae,
+            target_frames=target_frames,
+            fps=FPS,
+        )
+        reference_video_source = prepare_reference_video_source(
+            reference_video_1,
+            target_frames=align_frame_count_up(
+                int(round(float(kwargs["chunk_seconds"]) * FPS))
+            ),
+            output_width=int(kwargs["width"]),
+            output_height=int(kwargs["height"]),
+            size_mode=str(video_reference_size),
+        )
+        outputs = super().run(
+            reference_audio_1=None,
+            reference_audio_vae=None,
+            driving_audio_source=source,
+            driving_audio_vae=audio_vae,
+            reference_video_source=reference_video_source,
             **kwargs,
         )
-
-        selected_audio = _copy_audio(outputs[-1]) if outputs else None
+        selected_audio = _copy_audio(source.source_audio) if source is not None else None
         if selected_audio is not None and len(outputs) >= 3 and isinstance(outputs[2], dict):
             assembly_plan = dict(outputs[2])
             assembly_plan[_DRIVING_AUDIO_PLAN_KEY] = _copy_audio(selected_audio)
             outputs = (*outputs[:2], assembly_plan, *outputs[3:])
-        return outputs
+        return (*outputs, selected_audio)
 
 
 class H3ContinuumAssembleSeamV34(H3ContinuumAssembleSeamExperimental):
