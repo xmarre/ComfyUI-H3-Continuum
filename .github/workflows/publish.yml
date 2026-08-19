@@ -15,6 +15,7 @@ permissions:
 env:
   COMFY_CLI_VERSION: "1.13.0"
   COMFY_CLI_WHEEL_SHA256: "190108e4fa4fba44916f12eedbaca9ea685c2f9924c4370210092ccd17e6e5a8"
+  COMFY_CLI_CONSTRAINTS: ".github/comfy-cli-1.13.0-py310.constraints.txt"
 
 jobs:
   publish-node:
@@ -56,6 +57,7 @@ jobs:
           "${publish_env}/bin/python" -m pip install \
             --disable-pip-version-check \
             --only-binary=:all: \
+            --constraint "${COMFY_CLI_CONSTRAINTS}" \
             "${wheel}"
 
           echo "PUBLISH_COMFY=${publish_env}/bin/comfy" >> "${GITHUB_ENV}"
