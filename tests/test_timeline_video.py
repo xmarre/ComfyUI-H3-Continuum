@@ -73,7 +73,7 @@ def _source(size_mode=TIMELINE_VIDEO_SIZE_MATCH_OUTPUT):
     return video, source
 
 
-def test_v33_unifies_optional_timeline_video_and_keeps_v324_schema():
+def test_v33_unifies_optional_timeline_video_and_is_legacy_under_v34():
     legacy = H3ContinuumSamplerProduction.INPUT_TYPES()
     unified = H3ContinuumSamplerTimelineVideo.INPUT_TYPES()
     assert "timeline_video" not in legacy["required"]
@@ -84,7 +84,12 @@ def test_v33_unifies_optional_timeline_video_and_keeps_v324_schema():
     from ComfyUI_H3_Continuum_Join import nodes as root_nodes
 
     assert root_nodes.NODE_DISPLAY_NAME_MAPPINGS["H3ContinuumSamplerTimelineVideo"] == (
-        "H3 Continuum Sampler V3.3"
+        "[Legacy] H3 Continuum Sampler V3.3"
+    )
+    assert getattr(
+        root_nodes.NODE_CLASS_MAPPINGS["H3ContinuumSamplerTimelineVideo"],
+        "DEPRECATED",
+        False,
     )
     assert root_nodes.NODE_DISPLAY_NAME_MAPPINGS["H3ContinuumSamplerProduction"] == (
         "[Legacy] H3 Continuum Sampler V3.2.4"
