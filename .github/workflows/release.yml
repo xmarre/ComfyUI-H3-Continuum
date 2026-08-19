@@ -1,0 +1,116 @@
+name: release
+
+on:
+  workflow_run:
+    workflows: [tests]
+    types: [completed]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out tested commit
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Detect tested version bump
+        id: version
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          version="$(python -c 'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')"
+          if [[ ! "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid project version: ${version}" >&2
+            exit 1
+          fi
+
+          parent="$(git rev-parse "${RELEASE_SHA}^")"
+          previous="$(git show "${parent}:pyproject.toml" | python -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["project"]["version"])')"
+
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "tag=v${version}" >> "${GITHUB_OUTPUT}"
+          if [[ "${version}" == "${previous}" ]]; then
+            echo "release=false" >> "${GITHUB_OUTPUT}"
+            echo "Project version is unchanged (${version}); no release requested."
+          else
+            echo "release=true" >> "${GITHUB_OUTPUT}"
+            echo "Validated tested version bump: ${previous} -> ${version}."
+          fi
+
+      - name: Extract changelog notes
+        if: steps.version.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          version = os.environ["VERSION"]
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          match = re.search(
+              rf"(?ms)^##\s+{re.escape(version)}\s*$\n(.*?)(?=^##\s+|\Z)",
+              text,
+          )
+          if match is None:
+              raise SystemExit(
+                  f"CHANGELOG.md has no '## {version}' section; refusing to publish"
+              )
+          notes = match.group(1).strip()
+          if not notes:
+              raise SystemExit(f"CHANGELOG.md section {version} is empty")
+          pathlib.Path("/tmp/h3-continuum-release-notes.md").write_text(
+              notes + "\n", encoding="utf-8"
+          )
+          PY
+
+      - name: Build release archive
+        if: steps.version.outputs.release == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          mkdir -p dist
+          archive="ComfyUI-H3-Continuum-v${VERSION}.zip"
+          git archive \
+            --format=zip \
+            --prefix="ComfyUI-H3-Continuum-v${VERSION}/" \
+            --output="dist/${archive}" \
+            HEAD
+          (cd dist && sha256sum "${archive}" > SHA256SUMS)
+
+      - name: Publish GitHub release
+        if: steps.version.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; leaving it unchanged."
+            exit 0
+          fi
+          gh release create "${TAG}" \
+            dist/ComfyUI-H3-Continuum-v${VERSION}.zip \
+            dist/SHA256SUMS \
+            --target "${RELEASE_SHA}" \
+            --title "H3 Continuum ${TAG}" \
+            --notes-file /tmp/h3-continuum-release-notes.md
