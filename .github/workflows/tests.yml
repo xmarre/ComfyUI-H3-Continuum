@@ -87,7 +87,6 @@ jobs:
               prefix + "v3/driving_nodes.py",
               prefix + "v3/driving_nodes_impl.py",
               prefix + "web/project_id.js",
-              prefix + "web/reference_autogrow.js",
               prefix + "web/v34_ui.js",
           }
           with zipfile.ZipFile(os.environ["ARCHIVE"]) as archive:
@@ -103,7 +102,6 @@ jobs:
       - name: Check JavaScript syntax
         run: |
           node --check web/project_id.js
-          node --check web/reference_autogrow.js
           node --check web/v34_ui.js
 
       - name: Compile Python

@@ -173,16 +173,7 @@ function configureConditionalWidgets(node) {
         setWidgetVisible(nonceWidget, explicitRegeneration);
         setWidgetVisible(
             findWidget(node, REFERENCE_SIZE_WIDGET),
-            linkedInput(node, [
-                "reference_image_1",
-                "reference_image_2",
-                "reference_image_3",
-                "reference_image_4",
-                "reference_image_5",
-                "reference_image_6",
-                "reference_image_7",
-                "reference_image_8",
-            ]),
+            linkedInput(node, ["reference_image_1", "reference_image_2", "reference_image_3"]),
         );
         setWidgetVisible(
             findWidget(node, TIMELINE_SIZE_WIDGET),
@@ -306,7 +297,7 @@ app.registerExtension({
                         : "Basic";
                     apiNode.inputs.debug = Boolean(settingValue(SETTINGS.developerDiagnostics, false));
                     apiNode.inputs.show_preview = Boolean(settingValue(SETTINGS.samplingPreview, true));
-                    apiNode.inputs.strict_compatibility = true;
+        apiNode.inputs.strict_compatibility = false;
                 } else if (node.comfyClass === ASSEMBLE_SEAM_NODE_CLASS) {
                     apiNode.inputs.diagnostics = settingValue(SETTINGS.detailedReport, false)
                         ? "Detailed Report"

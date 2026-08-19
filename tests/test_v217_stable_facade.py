@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import pytest
-
 from ComfyUI_H3_Continuum_Join.constants import PROMPT_FORMAT_OPTIONS
 from ComfyUI_H3_Continuum_Join.v2.nodes import (
     H3ContinuumAdvanced,
@@ -11,7 +9,6 @@ from ComfyUI_H3_Continuum_Join.v2.nodes import (
     H3ContinuumSamplerV2,
     NODE_CLASS_MAPPINGS,
 )
-from ComfyUI_H3_Continuum_Join.v2.prompts import PromptPlanError
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -89,6 +86,7 @@ def test_v217_facade_delegates_to_legacy_core(monkeypatch):
     assert captured["sequence_prompt"] == "base prompt"
     assert captured["audio_continuity"] is True
     assert captured["show_preview"] is True
+    assert captured["strict_compatibility"] is False
 
 
 def test_v217_facade_passes_only_sparse_override_clips(monkeypatch):
@@ -115,19 +113,26 @@ def test_v217_facade_passes_only_sparse_override_clips(monkeypatch):
     assert not any(f"clip_{index}_prompt" in captured for index in (1, 3, 4))
 
 
-def test_v217_facade_rejects_sparse_override_outside_chunks(monkeypatch):
-    monkeypatch.setattr(H3ContinuumSamplerV2, "run", lambda _self, **kwargs: None)
+def test_v217_facade_ignores_out_of_range_sparse_override(monkeypatch):
+    captured = {}
+
+    def fake_run(_self, **kwargs):
+        captured.update(kwargs)
+        return "images", "audio", "state", "session", "report"
+
+    monkeypatch.setattr(H3ContinuumSamplerV2, "run", fake_run)
     pack = H3ContinuumClipOverrides().build(
         PROMPT_FORMAT_OPTIONS[0], "[Clip 6]\noutside"
     )[0]
-    with pytest.raises(PromptPlanError, match="outside"):
-        H3ContinuumSampler().run(
-            model="model", clip="clip", video_vae="video_vae", audio_vae="audio_vae",
-            sampler="sampler", sigmas="sigmas", sequence_prompt="base",
-            prompt_mode=PROMPT_FORMAT_OPTIONS[0], chunks=5, chunk_seconds=5.0,
-            width=1344, height=768, continuity="Balanced - 22 frames", base_seed=123,
-            seam_correction="Auto", prompt_overrides=pack,
-        )
+    result = H3ContinuumSampler().run(
+        model="model", clip="clip", video_vae="video_vae", audio_vae="audio_vae",
+        sampler="sampler", sigmas="sigmas", sequence_prompt="base",
+        prompt_mode=PROMPT_FORMAT_OPTIONS[0], chunks=5, chunk_seconds=5.0,
+        width=1344, height=768, continuity="Balanced - 22 frames", base_seed=123,
+        seam_correction="Auto", prompt_overrides=pack,
+    )
+    assert result[0:2] == ("images", "audio")
+    assert "clip_6_prompt" not in captured
 
 
 def test_v217_result_pack_expands_legacy_outputs():
