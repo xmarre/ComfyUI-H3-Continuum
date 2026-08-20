@@ -10,6 +10,7 @@ from ..masked_continuation import (
     CONTINUATION_METHODS,
     CONTINUATION_NATIVE_MASKED,
     continuation_method_scope,
+    validate_native_masked_request,
 )
 from ..reference import bundle_reference_images
 from ..reference_video import (
@@ -178,6 +179,18 @@ class H3ContinuumSamplerV34(H3ContinuumSamplerProduction):
     ):
         from ..reference_video import prepare_reference_video_source
         from ..temporal import align_frame_count_up
+
+        # Validate the cross-modal continuation contract before any VAE/model
+        # preparation. Old or manually edited workflows may still serialize a
+        # 5/22-frame profile alongside Native Masked + generated Audio Continuity;
+        # discovering that only when chunk 2 starts wastes a complete chunk 1.
+        validate_native_masked_request(
+            method=continuation_method,
+            continuity=str(kwargs.get("continuity", V2_CONTINUITY_OPTIONS[3])),
+            audio_continuity=bool(kwargs.get("audio_continuity", True)),
+            driving_audio_active=driving_audio is not None,
+            chunks=int(kwargs.get("chunks", 1)),
+        )
 
         active_reference = any(
             kwargs.get(f"reference_image_{index}") is not None
