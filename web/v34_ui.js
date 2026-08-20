@@ -6,6 +6,17 @@ const BASE_REFERENCE_INPUTS = 3;
 const MAX_REFERENCE_INPUTS = 8;
 const REFERENCE_NAME = /^reference_image_(\d+)$/;
 const LEGACY_CONTINUATION = "Guide / Motion Context";
+const NATIVE_CONTINUATION = "Native Masked — exact continuation (Recommended)";
+const CONTINUITY_AUTO = "Auto — conservative";
+const CONTINUITY_BALANCED = "Balanced — 22 frames";
+const CONTINUITY_FAST = "Fast — 5 frames";
+const CONTINUITY_STRONG = "Strong — 39 frames (Experimental)";
+const CONTINUITY_ALL = [
+    CONTINUITY_AUTO,
+    CONTINUITY_BALANCED,
+    CONTINUITY_FAST,
+    CONTINUITY_STRONG,
+];
 const SETTINGS = {
     detailedReport: "H3Continuum.DetailedReport",
     developerDiagnostics: "H3Continuum.DeveloperDiagnostics",
@@ -116,8 +127,29 @@ function regenerateOptions(chunks) {
     return ["Auto", ...Array.from({ length: count }, (_, index) => `Chunk ${index + 1}`)];
 }
 
+function reconcileContinuity(node) {
+    const continuity = findWidget(node, "continuity");
+    if (!continuity) return;
+    const chunks = Number.parseInt(findWidget(node, "chunks")?.value, 10) || 1;
+    const method = findWidget(node, "continuation_method")?.value;
+    const audioContinuity = Boolean(findWidget(node, "audio_continuity")?.value);
+    const generatedAudioExactAv = (
+        chunks > 1
+        && method === NATIVE_CONTINUATION
+        && audioContinuity
+        && !linkedInput(node, ["driving_audio"])
+    );
+    const values = generatedAudioExactAv
+        ? [CONTINUITY_AUTO, CONTINUITY_STRONG]
+        : CONTINUITY_ALL;
+    continuity.options ||= {};
+    continuity.options.values = values;
+    if (!values.includes(continuity.value)) continuity.value = CONTINUITY_STRONG;
+}
+
 function refreshSampler(node) {
     reconcileReferences(node);
+    reconcileContinuity(node);
     const project = findWidget(node, "project_id");
     if (project && !String(project.value || "").trim()) project.value = createProjectId();
 
@@ -211,7 +243,13 @@ function install(node) {
         queueMicrotask(refresh);
         return result;
     };
-    for (const widgetName of ["chunks", "run_storage", "reroll_from_chunk"]) {
+    for (const widgetName of [
+        "chunks",
+        "run_storage",
+        "reroll_from_chunk",
+        "continuation_method",
+        "audio_continuity",
+    ]) {
         const widget = findWidget(node, widgetName);
         if (!widget || widget.__h3ContinuumV34Callback) continue;
         const previous = widget.callback;
@@ -257,6 +295,8 @@ app.registerExtension({
                     apiNode.inputs.diagnostics = settingValue(SETTINGS.detailedReport, false)
                         ? "Detailed Report"
                         : "Basic";
+                    const continuity = findWidget(node, "continuity");
+                    if (continuity) apiNode.inputs.continuity = continuity.value;
                 }
             } else if (type === ASSEMBLER) {
                 refreshAssembler(node);
