@@ -1,5 +1,10 @@
 import torch
 
+from ComfyUI_H3_Continuum_Join.constants import V2_CONTINUITY_OPTIONS
+from ComfyUI_H3_Continuum_Join.masked_continuation import (
+    CONTINUATION_METHODS,
+    CONTINUATION_NATIVE_MASKED,
+)
 from ComfyUI_H3_Continuum_Join.nodes import NODE_CLASS_MAPPINGS
 from ComfyUI_H3_Continuum_Join.reference import ReferenceImageBundle
 from ComfyUI_H3_Continuum_Join.v3.driving_nodes import (
@@ -12,6 +17,18 @@ from ComfyUI_H3_Continuum_Join.v3.nodes import H3ContinuumSamplerProduction
 def test_v34_public_nodes_are_registered():
     assert NODE_CLASS_MAPPINGS["H3ContinuumSamplerV34"] is H3ContinuumSamplerV34
     assert NODE_CLASS_MAPPINGS["H3ContinuumAssembleSeamV34"] is H3ContinuumAssembleSeamV34
+
+
+def test_v34_native_masked_is_default_without_changing_v33_contract():
+    v34_required = H3ContinuumSamplerV34.INPUT_TYPES()["required"]
+    legacy_required = H3ContinuumSamplerProduction.INPUT_TYPES()["required"]
+
+    method = v34_required["continuation_method"]
+    assert method[0] == CONTINUATION_METHODS
+    assert method[1]["default"] == CONTINUATION_NATIVE_MASKED
+    assert v34_required["continuity"][1]["default"] == V2_CONTINUITY_OPTIONS[3]
+    assert "continuation_method" not in legacy_required
+    assert legacy_required["continuity"][1]["default"] != V2_CONTINUITY_OPTIONS[3]
 
 
 def test_v34_sampler_extends_official_contract_to_eight_references_only():

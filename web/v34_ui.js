@@ -5,6 +5,7 @@ const ASSEMBLER = "H3ContinuumAssembleSeamV34";
 const BASE_REFERENCE_INPUTS = 3;
 const MAX_REFERENCE_INPUTS = 8;
 const REFERENCE_NAME = /^reference_image_(\d+)$/;
+const LEGACY_CONTINUATION = "Guide / Motion Context";
 const SETTINGS = {
     detailedReport: "H3Continuum.DetailedReport",
     developerDiagnostics: "H3Continuum.DeveloperDiagnostics",
@@ -167,6 +168,27 @@ function refreshAssembler(node) {
     node.setDirtyCanvas?.(true, true);
 }
 
+function serializedContinuationMethod(info) {
+    const named = info?.widgets_values_named;
+    if (named && typeof named === "object" && Object.hasOwn(named, "continuation_method")) {
+        return named.continuation_method;
+    }
+    return undefined;
+}
+
+function migrateLegacySampler(node, info) {
+    if (!info || node.__h3ContinuumV34ContinuationMigrated) return;
+    const method = findWidget(node, "continuation_method");
+    if (!method) return;
+    // Saved V3.4 graphs before Native Masked had no continuation_method widget.
+    // Preserve their old guide/RoPE semantics instead of silently changing the
+    // generation contract. Newly created nodes retain the backend Native default.
+    if (serializedContinuationMethod(info) === undefined) {
+        method.value = LEGACY_CONTINUATION;
+    }
+    node.__h3ContinuumV34ContinuationMigrated = true;
+}
+
 function install(node) {
     if (!node || node.__h3ContinuumV34Installed) return;
     const type = String(node.comfyClass || node.type || "");
@@ -185,6 +207,7 @@ function install(node) {
     const previousConfigure = node.onConfigure;
     node.onConfigure = function (...args) {
         const result = previousConfigure?.apply(this, args);
+        if (type === SAMPLER) migrateLegacySampler(this, args[0]);
         queueMicrotask(refresh);
         return result;
     };
