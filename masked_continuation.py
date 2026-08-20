@@ -15,7 +15,7 @@ from typing import Any
 
 import torch
 
-from .constants import AUDIO_LATENT_FPS, FPS, V2_CONTINUITY_AUTO
+from .constants import AUDIO_LATENT_FPS, CONTINUITY_FRAMES, FPS, V2_CONTINUITY_AUTO
 from .continuation import clone_conditioning
 from .state import extract_av_streams, validate_state
 from .temporal import context_slots
@@ -124,6 +124,38 @@ def exact_audio_prefix_steps(context_frames: int) -> int:
             "continuity, disable generated Audio Continuity, or select Guide / Motion Context."
         )
     return numerator // denominator
+
+
+def validate_native_masked_request(
+    *,
+    method: str,
+    continuity: str,
+    audio_continuity: bool,
+    driving_audio_active: bool,
+    chunks: int,
+) -> None:
+    """Reject an impossible exact AV contract before any chunk is sampled.
+
+    Native video-only continuation can use every H3 video context profile. When
+    generated audio is also protected, the preserved prefix must end on both the
+    24-fps video grid and the 40-Hz audio grid. Auto resolves that requirement to
+    39 frames later from the accepted state; explicit 5/22-frame requests are
+    invalid and must never be discovered only after chunk 1 has finished.
+    """
+
+    method = validate_continuation_method(method)
+    if (
+        method != CONTINUATION_NATIVE_MASKED
+        or int(chunks) <= 1
+        or not bool(audio_continuity)
+        or bool(driving_audio_active)
+        or str(continuity) == V2_CONTINUITY_AUTO
+    ):
+        return
+    frames = CONTINUITY_FRAMES.get(str(continuity))
+    if frames is None:
+        raise NativeMaskedContinuationError(f"unknown continuity mode: {continuity!r}")
+    exact_audio_prefix_steps(int(frames))
 
 
 def choose_continuation_context_frames(
