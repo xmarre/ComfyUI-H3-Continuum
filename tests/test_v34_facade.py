@@ -1,9 +1,11 @@
+import pytest
 import torch
 
 from ComfyUI_H3_Continuum_Join.constants import V2_CONTINUITY_OPTIONS
 from ComfyUI_H3_Continuum_Join.masked_continuation import (
     CONTINUATION_METHODS,
     CONTINUATION_NATIVE_MASKED,
+    NativeMaskedContinuationError,
 )
 from ComfyUI_H3_Continuum_Join.nodes import NODE_CLASS_MAPPINGS
 from ComfyUI_H3_Continuum_Join.reference import ReferenceImageBundle
@@ -55,6 +57,28 @@ def test_v34_sampler_extends_official_contract_to_eight_references_only():
         "driving_audio",
     )
     assert H3ContinuumSamplerV34.OUTPUT_IS_LIST == (True, True, False, False, False)
+
+
+def test_v34_invalid_native_generated_audio_profile_fails_before_parent_sampling(monkeypatch):
+    parent_called = False
+
+    def fake_run(self, **kwargs):
+        nonlocal parent_called
+        parent_called = True
+        raise AssertionError("invalid native AV settings must fail before parent sampling")
+
+    monkeypatch.setattr(H3ContinuumSamplerProduction, "run", fake_run)
+    with pytest.raises(NativeMaskedContinuationError, match="22 video frames"):
+        H3ContinuumSamplerV34().run(
+            chunks=2,
+            chunk_seconds=5.0,
+            width=64,
+            height=64,
+            continuity=V2_CONTINUITY_OPTIONS[1],
+            audio_continuity=True,
+            continuation_method=CONTINUATION_NATIVE_MASKED,
+        )
+    assert parent_called is False
 
 
 def test_v34_reference_mode_precedence_and_extra_reference_bundle(monkeypatch):
