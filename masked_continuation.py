@@ -361,6 +361,11 @@ def stored_plan_matches_method(plan: dict[str, Any], method: str, *, chunk_numbe
     """Compatibility predicate for explicit Session reuse."""
 
     method = validate_continuation_method(method)
+    # A terminal-merged logical entry comes from one physical FL2VA sample. Its
+    # marker is validated atomically by the sequence runtime, and the selected
+    # continuation method did not generate that logical boundary independently.
+    if isinstance(plan.get("terminal_merge"), dict):
+        return True
     if int(chunk_number) <= 1:
         return True
     stored = plan.get("continuation_method")

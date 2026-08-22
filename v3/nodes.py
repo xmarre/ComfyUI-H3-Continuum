@@ -16,7 +16,7 @@ from ..v2.nodes import (
     validate_sparse_prompt_overrides,
 )
 from .assembly import H3ContinuumAssembleSeamExperimental, H3ContinuumAssembleV3
-from .plan import make_assembly_plan
+from .plan import prepare_physical_decode_entries
 from ..timeline_video import TIMELINE_VIDEO_SIZE_OPTIONS
 
 
@@ -338,13 +338,25 @@ class H3ContinuumSamplerV3:
             **clip_prompt_inputs,
         )
 
-        assembly_plan = make_assembly_plan(
+        from ..v2.sequence import terminal_entries_match_contract
+
+        terminal_merged = terminal_entries_match_contract(
+            entries,
+            chunk_seconds=float(chunk_seconds),
+        )
+        decode_entries, assembly_plan = prepare_physical_decode_entries(
             entries,
             chunk_seconds=float(chunk_seconds),
             preserve_final_frame=advanced_values["last_frame"] is not None,
+            terminal_merged=terminal_merged,
         )
-        video_latents = [{"samples": entry["video"]} for entry in entries]
-        audio_latents = [{"samples": entry["audio"]} for entry in entries]
+        video_latents = [{"samples": entry["video"]} for entry in decode_entries]
+        audio_latents = [{"samples": entry["audio"]} for entry in decode_entries]
+        if terminal_merged:
+            report = str(report).rstrip() + (
+                "\nDecode: the terminal merged latent remains one physical external "
+                "Core VAE decode group; logical Run Storage chunks remain separate."
+            )
         result = {
             "last_state": last_state,
             "session": session,

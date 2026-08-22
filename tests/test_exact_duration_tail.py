@@ -144,6 +144,8 @@ def test_short_cached_final_chunk_is_not_reused(monkeypatch):
         height=64,
         chunk_seconds=7.0,
         identity_hash="none",
+        first_frame_hash="none",
+        last_frame_hash="none",
     )
 
     assert len(preserved) == 1
@@ -174,6 +176,8 @@ def test_cached_final_chunk_at_or_above_target_remains_reusable(monkeypatch):
         height=64,
         chunk_seconds=7.0,
         identity_hash="none",
+        first_frame_hash="none",
+        last_frame_hash="none",
     )
 
     assert len(preserved) == 2

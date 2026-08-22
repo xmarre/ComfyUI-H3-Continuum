@@ -17,9 +17,11 @@ from ComfyUI_H3_Continuum_Join.v2.h3_builder import attach_keyframes
 class _Clip:
     def __init__(self):
         self.items = None
+        self.prompt = None
 
     def tokenize(self, prompt, *, minimax_ref_items):
         self.items = list(minimax_ref_items)
+        self.prompt = prompt
         return prompt
 
     def encode_from_tokens_scheduled(self, tokens):
@@ -68,6 +70,61 @@ def test_core_shaped_reference_presentation_and_keyframes_coexist():
         {"resolved_frame_index": 140, "latent": last_latent},
     ]
     assert metadata["minimax_frame_count"] == 141
+
+
+def test_hybrid_qwen_presentation_includes_keyframes_and_keeps_reference_numbering():
+    clip = _Clip()
+    first = torch.ones((1, 32, 32, 3))
+    last = torch.full((1, 32, 32, 3), 2.0)
+    references = _reference_assets()
+
+    conditioning = encode_reference_prompt(
+        clip,
+        "<Picture 1> remains the same person; <Picture 2> is unavailable",
+        references,
+        first_image=first,
+        last_image=last,
+    )
+
+    assert clip.items[0]["data"] is first
+    assert clip.items[1]["data"] is last
+    assert clip.items[2]["data"] is references.images[0]
+    assert clip.prompt == (
+        "<Picture 3> remains the same person; <Picture 4> is unavailable"
+    )
+    assert [ref["kind"] for ref in conditioning[0][1]["minimax_refs"]] == [
+        "image"
+    ]
+
+
+def test_hybrid_conditioning_cache_exposes_last_image_only_to_final_prompt(monkeypatch):
+    from types import SimpleNamespace
+
+    from ComfyUI_H3_Continuum_Join import reference
+    from ComfyUI_H3_Continuum_Join.v2 import sequence
+
+    calls = []
+
+    def fake_encode(_clip, prompt, _references, **kwargs):
+        calls.append((prompt, kwargs["first_image"], kwargs["last_image"]))
+        return [[torch.zeros(1), {}]]
+
+    monkeypatch.setattr(reference, "encode_reference_prompt", fake_encode)
+    assets = SimpleNamespace(first_image="first", last_image="last")
+    sequence._conditioning_cache(
+        clip=object(),
+        prompts=["opening", "finish"],
+        assets=assets,
+        final_has_last_frame=True,
+        reference_assets=object(),
+        reference_audio_assets=None,
+        timeline_video_assets=None,
+    )
+
+    assert calls == [
+        ("opening", "first", None),
+        ("finish", "first", "last"),
+    ]
 
 
 def test_native_masked_hybrid_drops_only_prefix_keyframe_and_keeps_reference_and_last():

@@ -193,15 +193,38 @@ The supplied templates use Video Helper Suite for this split. Any compatible IMA
 
 ## Prompt formats
 
-Timeline:
+### Timeline
 
 ~~~text
-[0-5s] First section: action, camera movement, and scene progression.
-[5-10s] Continue from the exact final state of the previous section.
-[10-15s] Continue naturally without resetting the scene.
+[0-5s]
+First section: action, camera movement, and scene progression.
+
+[5-10s]
+Continue from the exact final state of the previous section.
+
+[10-15s]
+Continue naturally without resetting the scene.
 ~~~
 
-List prompts use --- separators. Fixed reuses one prompt for every chunk. Auto detects the available structure. If a timeline cannot be parsed, V3.4 reports a warning and uses an applicable fallback rather than rejecting an otherwise runnable workflow.
+Each `[start-end]` header must be on its own line, followed by the prompt text. The ranges must use the active `chunk_seconds` boundaries. Inline forms such as `[0-5s] prompt text` are not Timeline syntax and Auto may treat them as Fixed input.
+
+### List, Fixed, and Auto
+
+List prompts use `---` separators. Fixed reuses one prompt for every chunk. Auto detects the available structure. If a timeline cannot be parsed, V3.4 reports a warning and uses an applicable fallback rather than rejecting an otherwise runnable workflow.
+
+## FL2VA terminal merge
+
+V3.4 latent-first FL2VA runs with 5-second logical chunks can keep the final two chunks as one physical H3 sample through external Core VAE decode. This preserves the terminal First/Last Frame path while Run Storage continues to address logical chunks.
+
+- A 2×5-second FL2VA run is one Core-equivalent 10-second initial sample under either continuation method.
+- In runs of three or more chunks, terminal merge is enabled only for **Guide / Motion Context** with **Balanced — 22 frames**, matching the validated upstream terminal-prefix contract.
+- Long **Native Masked** runs retain one physical sample per logical chunk because exact generated-AV continuation uses the fork's 39-video-frame / 65-audio-step boundary.
+- Timeline Video and non-5-second requests retain their established per-chunk path.
+- The two logical terminal records are reused or regenerated atomically, and their overlap must be bit-exact before physical reconstruction.
+
+## Hybrid First/Last/Reference presentation
+
+When First Frame or Last Frame is combined with Reference Images, Qwen now sees the applicable keyframe images as well as the references. Public prompt numbering remains stable: write Reference Image 1 through 8 as `<Picture 1>` through `<Picture 8>`; Continuum remaps those tags internally after the keyframe presentation items. Last Frame is included only in final conditioning, so earlier chunks do not receive the terminal target.
 
 ## Run Storage
 

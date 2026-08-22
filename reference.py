@@ -18,6 +18,7 @@ import torch
 
 REFERENCE_CONTRACT_VERSION = 1
 REFERENCE_PREPROCESS_VERSION = 1
+HYBRID_PRESENTATION_VERSION = 1
 REFERENCE_SIZE_MATCH_OUTPUT = "Match Output"
 REFERENCE_SIZE_MAX_IDENTITY = "Max Identity"
 REFERENCE_SIZE_OPTIONS = (
@@ -262,10 +263,42 @@ def validate_reference_prompts(prompts: list[str], reference_count: int) -> str:
     return "\n".join(warnings)
 
 
+def build_hybrid_presentation_items(
+    reference_items: list[dict[str, Any]],
+    *,
+    first_image: torch.Tensor | None = None,
+    last_image: torch.Tensor | None = None,
+) -> list[dict[str, Any]]:
+    """Build the Qwen image list while keeping DiT reference blocks unchanged."""
+
+    items: list[dict[str, Any]] = []
+    if first_image is not None:
+        items.append({"type": "image", "data": first_image})
+    if last_image is not None:
+        items.append({"type": "image", "data": last_image})
+    items.extend(dict(item) for item in reference_items)
+    return items
+
+
+def _shift_reference_picture_tags(prompt: str, picture_offset: int) -> str:
+    """Preserve the public Reference Image 1..N numbering in hybrid runs."""
+
+    offset = int(picture_offset)
+    if offset <= 0:
+        return str(prompt)
+
+    def replace(match: re.Match[str]) -> str:
+        return f"<Picture {int(match.group(1)) + offset}>"
+
+    return _PICTURE_TAG.sub(replace, str(prompt))
+
+
 def encode_reference_prompt(
     clip: Any,
     prompt: str,
     assets: ReferenceAssets,
+    first_image: torch.Tensor | None = None,
+    last_image: torch.Tensor | None = None,
     reference_audio_assets=None,
     timeline_video_assets=None,
 ) -> list[list[Any]]:
@@ -281,8 +314,20 @@ def encode_reference_prompt(
         from .reference_audio import reference_audio_item
 
         reference_items.append(reference_audio_item())
+    presentation_items = build_hybrid_presentation_items(
+        reference_items,
+        first_image=first_image,
+        last_image=last_image,
+    )
+    presentation_prompt = _shift_reference_picture_tags(
+        prompt,
+        int(first_image is not None) + int(last_image is not None),
+    )
     try:
-        tokens = clip.tokenize(str(prompt), minimax_ref_items=reference_items)
+        tokens = clip.tokenize(
+            presentation_prompt,
+            minimax_ref_items=presentation_items,
+        )
     except TypeError as exc:
         raise ReferenceConditioningError(
             "This ComfyUI Core/CLIP does not support MiniMax H3 image references"
