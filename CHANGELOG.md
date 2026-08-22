@@ -2,13 +2,23 @@
 
 ## Unreleased
 
+## 3.4.1
+
+- Completed the post-v3.4.0 V3.4 hotfix set: package registration/runtime-contract synchronization, Core-aligned prompt validation, finalized package metadata, and conditional-widget visibility are all included in this release.
+- Fixed hybrid First/Last/Reference conditioning so Reference Images remain additive to the temporal keyframe mode instead of suppressing First Frame or Last Frame semantics. Native Masked and Guide continuation preserve the correct keyframe/reference composition, Run Storage fingerprints keyframes and references independently, and the V3.4 facade supports the full ordered Reference Image 1..8 range.
+- Added tested-main GitHub Release automation and Comfy Registry publishing with the expanded Python/runtime validation matrix used by the current V3.4 package.
 - Added V3.4 **Native Masked — exact continuation** as the recommended/default exact chunk-continuation mechanism using ComfyUI Core MiniMax H3 per-token denoise masks from PR #15375.
 - Preserved **Guide / Motion Context** as a separate softer continuation method and kept V2/V3.3 workflow behavior on the legacy guide/RoPE path.
 - Reused accepted generated H3 video/audio latents directly for protected target prefixes without decode/re-encode, with exact 39-frame/65-audio-step generated-AV boundary validation.
 - Kept Driving Audio authoritative by protecting video only in that mode, retaining absolute source-audio guide slices, and preserving final source-audio assembly behavior.
 - Versioned Native Masked continuation chunk fingerprints/plans so Run Storage never silently reuses Guide chunks as Native Masked while preserving reusable chunk 1 where possible.
 - Kept Spectrum Interop API v1 Actual Prefix 2 independent of the old layout rewrite.
-- Added regression coverage and documentation for native masks, temporal mapping, references/keyframes, restartability, assembly, and compatibility requirements.
+- Added exact per-chunk `refine_state` output for learned-latent sampler-2 workflows. Each state carries a fresh clone of the exact Continuum MODEL wrapper plus the exact positive CONDITIONING used for that chunk.
+- Restored the exact captured Native Masked video/audio denoise-mask members onto the matching split LATENT outputs when refinement-state capture is requested, keeping chunk N's video, audio, model, conditioning and masks aligned.
+- Made refinement capture output-link-driven so ordinary Continuum workflows keep the previous runtime/memory behavior when `refine_state` is unused.
+- Kept Run Storage fail-closed for exact refinement when a stored prefix would leave raw runtime MODEL/CONDITIONING state unavailable; use Run Storage Off or regenerate from Chunk 1 for an exact refinement run.
+- Added regression coverage and documentation for native masks, temporal mapping, references/keyframes, restartability, assembly, refinement-state capture, output ordering, Run Storage alignment and compatibility requirements.
+- Completed coordinated real CUDA validation with the integrated MiniMax H3 latent upscaler/refiner, Spectrum and DiffAid. The exact handoff ran through target-resolution sampler 2 successfully, and the validated three-step refinement used `actual -> forecast -> actual` with user-confirmed impeccable media quality.
 
 ## 3.4.0
 

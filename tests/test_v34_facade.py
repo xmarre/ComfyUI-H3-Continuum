@@ -62,7 +62,8 @@ def test_v34_strong_values_normalize_before_legacy_sequence_engine(monkeypatch, 
     )
 
     assert captured["continuity"] == V2_CONTINUITY_OPTIONS[3]
-    assert outputs == (["v"], ["a"], {"target_frames": 120}, "status", None)
+    assert outputs[:5] == (["v"], ["a"], {"target_frames": 120}, "status", None)
+    assert outputs[5] == []
 
 
 def test_v34_sampler_extends_official_contract_to_eight_references_only():
@@ -81,14 +82,25 @@ def test_v34_sampler_extends_official_contract_to_eight_references_only():
     assert v34_optional["audio_vae"][0] == "VAE"
     assert "reference_audio_1" not in v34_optional
     assert "reference_audio_vae" not in v34_optional
-    assert H3ContinuumSamplerV34.RETURN_NAMES == (
+
+    assert H3ContinuumSamplerV34.RETURN_NAMES[:5] == (
         "video_latents",
         "audio_latents",
         "assembly_plan",
         "status",
         "driving_audio",
     )
-    assert H3ContinuumSamplerV34.OUTPUT_IS_LIST == (True, True, False, False, False)
+    assert H3ContinuumSamplerV34.RETURN_TYPES[:5] == (
+        "LATENT",
+        "LATENT",
+        "H3_CONTINUUM_ASSEMBLY_PLAN",
+        "STRING",
+        "AUDIO",
+    )
+    assert H3ContinuumSamplerV34.OUTPUT_IS_LIST[:5] == (True, True, False, False, False)
+    assert H3ContinuumSamplerV34.RETURN_NAMES[5:] == ("refine_state",)
+    assert H3ContinuumSamplerV34.RETURN_TYPES[5:] == ("H3_CONTINUUM_REFINE_STATE",)
+    assert H3ContinuumSamplerV34.OUTPUT_IS_LIST[5:] == (True,)
 
 
 def test_v34_invalid_native_generated_audio_profile_fails_before_parent_sampling(monkeypatch):
@@ -182,4 +194,5 @@ def test_v34_preserves_hybrid_keyframes_and_bundles_extra_references(monkeypatch
     assert captured["driving_audio_source"] is None
     assert captured["reference_video_source"] is None
     assert captured["continuity"] == V2_CONTINUITY_OPTIONS[3]
-    assert outputs == (["v"], ["a"], {"target_frames": 120}, "status", None)
+    assert outputs[:5] == (["v"], ["a"], {"target_frames": 120}, "status", None)
+    assert outputs[5] == []

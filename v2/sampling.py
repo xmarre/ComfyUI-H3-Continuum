@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 import torch
@@ -11,6 +13,58 @@ from ..state import extract_av_streams
 
 class SamplingRuntimeError(RuntimeError):
     pass
+
+
+_CONDITIONING_CAPTURE: ContextVar[list[list] | None] = ContextVar(
+    "h3_continuum_conditioning_capture",
+    default=None,
+)
+_REFINE_STATE_CAPTURE: ContextVar[list[dict[str, Any]] | None] = ContextVar(
+    "h3_continuum_refine_state_capture",
+    default=None,
+)
+
+
+@contextmanager
+def capture_chunk_conditioning():
+    """Capture exact CONDITIONING objects passed to sampled chunks in this context."""
+    captured: list[list] = []
+    token = _CONDITIONING_CAPTURE.set(captured)
+    try:
+        yield captured
+    finally:
+        _CONDITIONING_CAPTURE.reset(token)
+
+
+@contextmanager
+def capture_chunk_refine_state():
+    """Capture exact transient state required to refine each sampled chunk later."""
+    captured: list[dict[str, Any]] = []
+    token = _REFINE_STATE_CAPTURE.set(captured)
+    try:
+        yield captured
+    finally:
+        _REFINE_STATE_CAPTURE.reset(token)
+
+
+def _record_chunk_conditioning(conditioning: list) -> None:
+    """Record one sampler conditioning object when conditioning capture is active."""
+    target = _CONDITIONING_CAPTURE.get()
+    if target is not None:
+        target.append(conditioning)
+
+
+def _record_chunk_refine_state(*, model: Any, conditioning: list, noise_mask: Any) -> None:
+    """Record exact sampler-boundary MODEL/conditioning/mask without reconstruction."""
+    target = _REFINE_STATE_CAPTURE.get()
+    if target is not None:
+        target.append(
+            {
+                "model": model,
+                "positive": conditioning,
+                "noise_mask": noise_mask,
+            }
+        )
 
 
 def _make_basic_guider(model: Any, conditioning: list):
@@ -72,6 +126,12 @@ def sample_chunk(
     )
     working["samples"] = latent_image
     noise_mask = working.get("noise_mask")
+    _record_chunk_conditioning(conditioning)
+    _record_chunk_refine_state(
+        model=model,
+        conditioning=conditioning,
+        noise_mask=noise_mask,
+    )
     guider = _make_basic_guider(model, conditioning)
     noise = _prepare_noise(working, seed)
 

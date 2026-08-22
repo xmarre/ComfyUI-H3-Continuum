@@ -23,6 +23,7 @@ from .nodes import CATEGORY as CONTINUUM_CATEGORY, H3ContinuumSamplerProduction
 
 
 _DRIVING_AUDIO_PLAN_KEY = "_h3_continuum_driving_audio_v1"
+REFINE_STATE_API = 1
 V34_CONTINUITY_STRONG = "Strong — 39 frames"
 V34_CONTINUITY_OPTIONS = (
     V2_CONTINUITY_OPTIONS[0],
@@ -34,14 +35,7 @@ V34_CONTINUITY_OPTIONS = (
 
 
 def _normalize_v34_continuity(value: str) -> str:
-    """Map the V3.4 display value onto the inherited sequence wire contract.
-
-    V2/V3.3 keep the historical ``Strong — 39 frames (Experimental)`` value.
-    V3.4 promotes that exact 39-frame boundary, so its public widget uses the
-    unsuffixed label while still accepting the old serialized value as an API
-    compatibility alias.
-    """
-
+    """Map the V3.4 display value onto the inherited sequence wire contract."""
     value = str(value)
     if value == V34_CONTINUITY_STRONG:
         return V2_CONTINUITY_OPTIONS[3]
@@ -80,6 +74,117 @@ def _driving_audio_from_plan(args, kwargs):
     return _copy_audio(value.get(_DRIVING_AUDIO_PLAN_KEY))
 
 
+def _validate_refine_alignment(*, enabled, captured, video_latents):
+    if not enabled:
+        return
+    if not isinstance(video_latents, list):
+        raise ValueError("Continuum video_latents output must be a chunk list")
+    expected = len(video_latents)
+    actual = len(captured)
+    if actual != expected:
+        reused = max(0, expected - actual)
+        detail = (
+            f"{reused} of {expected} output chunk(s) were reused without sampling in this execution"
+            if reused
+            else f"captured {actual} refinement state object(s) for {expected} output chunk(s)"
+        )
+        raise ValueError(
+            "Exact Refine State cannot be emitted because "
+            f"{detail}. Continuum intentionally does not persist raw sampler-boundary state in Run Storage. "
+            "Set Run Storage = Off, or use Regenerate From = Chunk 1 for this run. "
+            "Refusing to pair a generated state suffix with the full latent list."
+        )
+
+
+def _copy_mask_tensor(value):
+    if value is None:
+        return None
+    if not torch.is_tensor(value):
+        raise TypeError(f"Continuum denoise mask member must be torch.Tensor, got {type(value).__name__}")
+    return value.detach().to("cpu").contiguous().clone()
+
+
+def _split_noise_mask(value):
+    if value is None:
+        return None, None
+    if torch.is_tensor(value):
+        return value, None
+    unbind = getattr(value, "unbind", None)
+    if not callable(unbind):
+        raise TypeError(f"Continuum joint denoise mask must be NestedTensor-like, got {type(value).__name__}")
+    members = list(unbind())
+    if len(members) != 2:
+        raise ValueError(
+            "Continuum MiniMax H3 joint denoise mask must contain [video_mask, audio_mask]"
+        )
+    return members[0], members[1]
+
+
+def _attach_refine_masks(*, enabled, captured, video_latents, audio_latents):
+    """Restore sampler-1 denoise masks onto V3.4's intentionally split LATENT outputs."""
+    if not enabled:
+        return video_latents, audio_latents
+    _validate_refine_alignment(
+        enabled=True,
+        captured=captured,
+        video_latents=video_latents,
+    )
+    if not isinstance(audio_latents, list) or len(audio_latents) != len(video_latents):
+        raise ValueError("Continuum audio_latents output is not aligned with video_latents")
+
+    video_out = []
+    audio_out = []
+    for index, record in enumerate(captured):
+        video_item = dict(video_latents[index])
+        audio_item = dict(audio_latents[index])
+        video_mask, audio_mask = _split_noise_mask(record.get("noise_mask"))
+        if video_mask is not None:
+            video_item["noise_mask"] = _copy_mask_tensor(video_mask)
+        if audio_mask is not None:
+            audio_item["noise_mask"] = _copy_mask_tensor(audio_mask)
+        video_out.append(video_item)
+        audio_out.append(audio_item)
+    return video_out, audio_out
+
+
+def _fresh_refine_model(sampled_model, *, debug: bool):
+    """Clone sampler-1's exact patched MODEL state but install a fresh Continuum wrapper closure."""
+    from ..model_patch import configure_continuum_model
+
+    if sampled_model is None or not hasattr(sampled_model, "clone"):
+        raise TypeError("Captured Continuum chunk MODEL is not cloneable")
+    fresh = sampled_model.clone()
+    return configure_continuum_model(
+        fresh,
+        strict=False,
+        debug=bool(debug),
+    )
+
+
+def _refine_state_output(*, enabled, captured, video_latents, debug: bool):
+    """Build one exact, fresh MODEL+CONDITIONING refinement contract per chunk."""
+    if not enabled:
+        return []
+    _validate_refine_alignment(
+        enabled=True,
+        captured=captured,
+        video_latents=video_latents,
+    )
+    output = []
+    for record in captured:
+        positive = record.get("positive")
+        if positive is None:
+            raise ValueError("Captured Continuum refine state is missing positive conditioning")
+        output.append(
+            {
+                "api": REFINE_STATE_API,
+                "model": _fresh_refine_model(record.get("model"), debug=bool(debug)),
+                "positive": positive,
+            }
+        )
+    return output
+
+
 class H3ContinuumSamplerV34(H3ContinuumSamplerProduction):
     """V3.4 sampler with native masked continuation and Driving Audio."""
 
@@ -88,7 +193,8 @@ class H3ContinuumSamplerV34(H3ContinuumSamplerProduction):
     DESCRIPTION = (
         "H3 Continuum V3.4 with native masked AV continuation by default, optional "
         "Guide / Motion Context continuation, hybrid First/Last + Reference Image "
-        "conditioning, Driving Audio, and persistent Video Reference."
+        "conditioning, Driving Audio, persistent Video Reference, and opt-in exact "
+        "per-chunk refinement state for learned latent upscaling."
     )
     SEARCH_ALIASES = [
         "H3 Continuum Sampler V3.4",
@@ -101,6 +207,7 @@ class H3ContinuumSamplerV34(H3ContinuumSamplerProduction):
         "H3_CONTINUUM_ASSEMBLY_PLAN",
         "STRING",
         "AUDIO",
+        "H3_CONTINUUM_REFINE_STATE",
     )
     RETURN_NAMES = (
         "video_latents",
@@ -108,18 +215,14 @@ class H3ContinuumSamplerV34(H3ContinuumSamplerProduction):
         "assembly_plan",
         "status",
         "driving_audio",
+        "refine_state",
     )
-    OUTPUT_IS_LIST = (True, True, False, False, False)
+    OUTPUT_IS_LIST = (True, True, False, False, False, True)
 
     @classmethod
     def INPUT_TYPES(cls):
         schema = super().INPUT_TYPES()
         required = dict(schema.get("required", {}))
-        # Keep the inherited key position stable for saved workflows while making
-        # the new exact-AV default internally valid. 39 video frames map exactly
-        # to 65 H3 audio-latent steps at 24 fps / 40 Hz. The final legacy value
-        # remains accepted for headless/serialized V3.4 compatibility; v34_ui.js
-        # presents only the canonical unsuffixed V3.4 value.
         required["continuity"] = (
             V34_CONTINUITY_OPTIONS,
             {
@@ -143,9 +246,6 @@ class H3ContinuumSamplerV34(H3ContinuumSamplerProduction):
                 ),
             },
         )
-        # Appending this widget avoids shifting existing V3.4 serialized widget
-        # positions. New nodes receive the Native default; v34_ui.js migrates
-        # saved graphs without this widget to Guide / Motion Context.
         required["continuation_method"] = (
             CONTINUATION_METHODS,
             {
@@ -155,6 +255,23 @@ class H3ContinuumSamplerV34(H3ContinuumSamplerProduction):
                     "Native Masked preserves the previous generated H3 latent directly "
                     "inside the next target and is recommended for exact same-shot continuation. "
                     "Guide / Motion Context keeps the previous clip as softer H3 guide context."
+                ),
+            },
+        )
+        # Appended after all existing V3.4 widgets to preserve serialized positions.
+        # The frontend keeps it hidden and drives it from the refine_state output link.
+        required["emit_refine_conditioning"] = (
+            "BOOLEAN",
+            {
+                "default": False,
+                "advanced": True,
+                "display_name": "Emit Refine State",
+                "tooltip": (
+                    "Expose exact per-chunk refinement state: a fresh Continuum MODEL wrapper, "
+                    "the exact positive CONDITIONING passed to sampler 1, and the matching native "
+                    "denoise masks on video/audio LATENT outputs. Enable only for downstream "
+                    "learned-latent refinement. If Run Storage reused chunks, regenerate from "
+                    "Chunk 1 or disable Run Storage so every state remains exactly aligned."
                 ),
             },
         )
@@ -206,11 +323,11 @@ class H3ContinuumSamplerV34(H3ContinuumSamplerProduction):
     ):
         from ..reference_video import prepare_reference_video_source
         from ..temporal import align_frame_count_up
+        from ..v2.sampling import capture_chunk_refine_state
 
-        # Validate the cross-modal continuation contract before any VAE/model
-        # preparation. Old or manually edited workflows may still serialize a
-        # 5/22-frame profile alongside Native Masked + generated Audio Continuity;
-        # discovering that only when chunk 2 starts wastes a complete chunk 1.
+        emit_refine_state = bool(kwargs.pop("emit_refine_conditioning", False))
+        debug = bool(kwargs.get("debug", False))
+
         continuity = _normalize_v34_continuity(
             kwargs.get("continuity", V34_CONTINUITY_STRONG)
         )
@@ -221,15 +338,8 @@ class H3ContinuumSamplerV34(H3ContinuumSamplerProduction):
             driving_audio_active=driving_audio is not None,
             chunks=int(kwargs.get("chunks", 1)),
         )
-        # The inherited V2/V3.3 sequence engine intentionally keeps its stable
-        # historical wire value. Normalize only at this V3.4 facade boundary.
         kwargs["continuity"] = continuity
 
-        # Reference blocks and First/Last keyframes are orthogonal Core H3
-        # conditioning. Do not discard First/Last when references are connected:
-        # the inherited sequence engine encodes ref2va presentation first and
-        # layers keyframe latents on that conditioning, matching Core's
-        # Reference-to-Video + Add Guide composition.
         extra_references = [
             kwargs.pop(f"reference_image_{index}", None)
             for index in range(4, 9)
@@ -258,21 +368,45 @@ class H3ContinuumSamplerV34(H3ContinuumSamplerProduction):
             output_height=int(kwargs["height"]),
             size_mode=str(video_reference_size),
         )
-        with continuation_method_scope(continuation_method):
-            outputs = super().run(
-                reference_audio_1=None,
-                reference_audio_vae=None,
-                driving_audio_source=source,
-                driving_audio_vae=audio_vae,
-                reference_video_source=reference_video_source,
-                **kwargs,
-            )
+
+        def run_sampler():
+            with continuation_method_scope(continuation_method):
+                return super(H3ContinuumSamplerV34, self).run(
+                    reference_audio_1=None,
+                    reference_audio_vae=None,
+                    driving_audio_source=source,
+                    driving_audio_vae=audio_vae,
+                    reference_video_source=reference_video_source,
+                    **kwargs,
+                )
+
+        if emit_refine_state:
+            with capture_chunk_refine_state() as captured_refine_state:
+                outputs = run_sampler()
+        else:
+            captured_refine_state = []
+            outputs = run_sampler()
+
+        video_latents, audio_latents = _attach_refine_masks(
+            enabled=emit_refine_state,
+            captured=captured_refine_state,
+            video_latents=outputs[0],
+            audio_latents=outputs[1],
+        )
+        outputs = (video_latents, audio_latents, *outputs[2:])
+        refine_state = _refine_state_output(
+            enabled=emit_refine_state,
+            captured=captured_refine_state,
+            video_latents=video_latents,
+            debug=debug,
+        )
+
         selected_audio = _copy_audio(source.source_audio) if source is not None else None
         if selected_audio is not None and len(outputs) >= 3 and isinstance(outputs[2], dict):
             assembly_plan = dict(outputs[2])
             assembly_plan[_DRIVING_AUDIO_PLAN_KEY] = _copy_audio(selected_audio)
             outputs = (*outputs[:2], assembly_plan, *outputs[3:])
-        return (*outputs, selected_audio)
+        return (*outputs, selected_audio, refine_state)
 
 
 class H3ContinuumAssembleSeamV34(H3ContinuumAssembleSeamExperimental):
@@ -329,10 +463,10 @@ class H3ContinuumAssembleSeamV34(H3ContinuumAssembleSeamExperimental):
                 target_frames=int(plan_value["target_frames"]),
                 preserve_final_frame=bool(plan_value.get("preserve_final_frame", False)),
             )
-        source = "assembly plan" if preserved_audio is not None else "direct input"
+        source_name = "assembly plan" if preserved_audio is not None else "direct input"
         samples = int(selected["waveform"].shape[-1])
         report = str(report) + (
-            f"\nDriving Audio: preserved source selected from {source}; "
+            f"\nDriving Audio: preserved source selected from {source_name}; "
             f"sample_rate={selected['sample_rate']}, samples={samples}; "
             "generated audio and Audio Seam bypassed."
         )

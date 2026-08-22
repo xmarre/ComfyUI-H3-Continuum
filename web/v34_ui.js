@@ -75,6 +75,11 @@ function linkedInput(node, names) {
     return node.inputs?.some((input) => names.includes(input.name) && input.link != null) ?? false;
 }
 
+function linkedOutput(node, name) {
+    const output = node.outputs?.find((candidate) => candidate.name === name);
+    return Array.isArray(output?.links) && output.links.length > 0;
+}
+
 function referenceIndex(input) {
     const match = REFERENCE_NAME.exec(String(input?.name ?? ""));
     if (!match) return 0;
@@ -157,11 +162,13 @@ function refreshSampler(node) {
     const debug = findWidget(node, "debug");
     const preview = findWidget(node, "show_preview");
     const strict = findWidget(node, "strict_compatibility");
+    const emitRefine = findWidget(node, "emit_refine_conditioning");
     if (diagnostics) diagnostics.value = settingValue(SETTINGS.detailedReport, false) ? "Detailed Report" : "Basic";
     if (debug) debug.value = Boolean(settingValue(SETTINGS.developerDiagnostics, false));
     if (preview) preview.value = Boolean(settingValue(SETTINGS.samplingPreview, true));
     if (strict) strict.value = false;
-    for (const widget of [diagnostics, debug, preview, strict, project]) setWidgetVisible(widget, false);
+    if (emitRefine) emitRefine.value = linkedOutput(node, "refine_state");
+    for (const widget of [diagnostics, debug, preview, strict, project, emitRefine]) setWidgetVisible(widget, false);
 
     const chunks = findWidget(node, "chunks");
     const regenerate = findWidget(node, "reroll_from_chunk");
@@ -212,9 +219,6 @@ function migrateLegacySampler(node, info) {
     if (!info || node.__h3ContinuumV34ContinuationMigrated) return;
     const method = findWidget(node, "continuation_method");
     if (!method) return;
-    // Saved V3.4 graphs before Native Masked had no continuation_method widget.
-    // Preserve their old guide/RoPE semantics instead of silently changing the
-    // generation contract. Newly created nodes retain the backend Native default.
     if (serializedContinuationMethod(info) === undefined) {
         method.value = LEGACY_CONTINUATION;
     }
@@ -295,6 +299,7 @@ app.registerExtension({
                     apiNode.inputs.diagnostics = settingValue(SETTINGS.detailedReport, false)
                         ? "Detailed Report"
                         : "Basic";
+                    apiNode.inputs.emit_refine_conditioning = linkedOutput(node, "refine_state");
                     const continuity = findWidget(node, "continuity");
                     if (continuity) apiNode.inputs.continuity = continuity.value;
                 }
