@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Adapted upstream's V3.4 FL2VA terminal merge as an explicit physical-decode-group contract: 2×5-second FL2VA uses one Core-equivalent initial sample, while 3+ chunk merging is limited to Guide / Motion Context with the validated Balanced 22-frame prefix.
+- Preserved the fork's Native Masked 39-video-frame / 65-audio-step generated-AV boundary by retaining per-logical-chunk sampling for long Native Masked sequences.
+- Made terminal Run Storage pairs atomic, versioned their fingerprints and plan markers, and required bit-exact latent overlap before reconstructing one physical Core VAE decode unit.
+- Added First/Last Frame images to hybrid Qwen presentation while preserving public Reference Image `<Picture 1>` through `<Picture 8>` numbering and keeping Last Frame out of non-final conditioning.
+- Corrected Timeline documentation so section headers and prompt text match the parser's line-based syntax.
+
 ## 3.4.1
 
 - Completed the post-v3.4.0 V3.4 hotfix set: package registration/runtime-contract synchronization, Core-aligned prompt validation, finalized package metadata, and conditional-widget visibility are all included in this release.

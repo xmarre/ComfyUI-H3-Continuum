@@ -6,7 +6,7 @@ MiniMax H3を複数チャンクで連続生成し、直前チャンク末尾の*
 
 ## V3.4.0 Stable
 
-V3.4.0は、最大3枚のReference Image、Run Storage、Spectrum Interop、Decode後のAudio / Video Seam補正を維持し、Driving AudioとVideo Referenceを正式な入力として追加します。
+V3.4.0は、最大8枚のReference Image、Run Storage、Spectrum Interop、Decode後のAudio / Video Seam補正を維持し、Driving AudioとVideo Referenceを正式な入力として追加します。
 
 Driving Audioは入力音声を絶対時間で各Chunkのガイドに使い、最終出力には元音声を維持します。Video Referenceは参照映像を全Chunkで継続使用し、`Efficient - 0.4 MP`、`Balanced - 0.6 MP`、`Match Output`から処理解像度を選択できます。
 
@@ -65,6 +65,28 @@ outputs: images / audio / result
 - `Strong — 39 frames (Experimental)`
 
 5/22/39フレームはH3の時間latent周期`1,4,4,4,4`に対して、それぞれ2/7/12 temporal latent stepsです。
+
+## Prompt Format
+
+Timelineでは各Headerを独立した行に置き、その次の行からPromptを書きます。時間範囲は`chunk_seconds`の境界と一致させてください。
+
+```text
+[0-5s]
+最初の区間の動作、カメラ、場面進行。
+
+[5-10s]
+前区間の最終状態から自然に継続。
+```
+
+`[0-5s] Prompt`のような同一行形式はTimeline構文ではありません。Listは`---`で区切り、Fixedは全Chunkで同じPromptを使用します。
+
+## FL2VA terminal merge
+
+5秒ChunkのV3.4 latent-first FL2VAでは、条件を満たす最終2 Logical Chunkを1回のPhysical H3 sampleとCore VAE decode groupとして扱います。2×5秒はContinuation Methodに関係なくCore相当の10秒初回sampleです。3 Chunk以上では、検証済みの22-frame prefixに一致する`Guide / Motion Context` + `Balanced — 22 frames`だけを対象にします。
+
+長尺`Native Masked`は、正確なGenerated AV継続に必要な39 video frames / 65 audio stepsを守るため、従来どおりLogical ChunkごとにPhysical sampleを生成します。Terminal pairのRun Storage再利用と再生成は必ず2 Chunk単位で行い、Physical再構成前にoverlapの完全一致を検証します。
+
+First Frame / Last FrameとReference Imageを併用する場合、Qwen presentationにも適用対象のKeyframe画像を含めます。Promptでは引き続きReference Image 1〜8を`<Picture 1>`〜`<Picture 8>`として記述でき、内部で番号を調整します。Last Frameは最終conditioningだけに含めます。
 
 ## Spectrum
 

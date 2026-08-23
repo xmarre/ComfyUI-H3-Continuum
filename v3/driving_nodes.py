@@ -331,12 +331,21 @@ class H3ContinuumSamplerV34(H3ContinuumSamplerProduction):
         continuity = _normalize_v34_continuity(
             kwargs.get("continuity", V34_CONTINUITY_STRONG)
         )
+        chunks = int(kwargs.get("chunks", 1))
+        initial_terminal_flf = (
+            chunks == 2
+            and abs(float(kwargs.get("chunk_seconds", 0.0)) - 5.0) <= 1e-6
+            and kwargs.get("first_frame") is not None
+            and kwargs.get("last_frame") is not None
+        )
         validate_native_masked_request(
             method=continuation_method,
             continuity=continuity,
             audio_continuity=bool(kwargs.get("audio_continuity", True)),
             driving_audio_active=driving_audio is not None,
-            chunks=int(kwargs.get("chunks", 1)),
+            # A 2x5 FL2VA terminal request is one physical initial sample and has
+            # no protected inter-sample AV boundary to validate.
+            chunks=1 if initial_terminal_flf else chunks,
         )
         kwargs["continuity"] = continuity
 

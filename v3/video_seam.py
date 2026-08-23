@@ -390,7 +390,9 @@ def analyze_decoded_boundaries(
     """Analyze every decoded chunk boundary without changing decoded content."""
 
     plan = validate_assembly_plan(assembly_plan)
-    chunks = list(plan["chunks"])
+    chunks = list(
+        plan["decode_groups"] if "decode_groups" in plan else plan["chunks"]
+    )
     if len(images) != len(chunks):
         raise ValueError("decoded image count does not match the assembly plan")
     analyses: list[VideoBoundaryAnalysis] = []
@@ -444,7 +446,9 @@ def build_decoded_boundary_patches(
     """Build only the corrected retained boundary frames for qualified seams."""
 
     plan = validate_assembly_plan(assembly_plan)
-    chunks = list(plan["chunks"])
+    chunks = list(
+        plan["decode_groups"] if "decode_groups" in plan else plan["chunks"]
+    )
     if len(images) != len(chunks):
         raise ValueError("decoded image count does not match the assembly plan")
 
