@@ -46,6 +46,24 @@ There is no external BasicGuider, DisableNoise, or SamplerCustomAdvanced. The up
 
 The three Continuum list outputs are parallel and map by chunk index, so chunk N's video, audio, model wrapper, conditioning, and mask remain aligned.
 
+## Natural-timeline image refinement
+
+Image-space refinement that tracks across the complete result must retain every physical-group
+frame until the refined images have been stitched back. On **H3 Continuum Assemble + Seam V3.4**,
+select `Timeline Output = Natural retained timeline (Refinement)`. This is an explicit opt-in;
+the default remains `Exact requested duration (Recommended)`.
+
+After downstream refinement/stitching, connect the natural IMAGE batch, the assembler AUDIO, and
+the same `assembly_plan` to **H3 Continuum Finalize Duration V3.4**. The finalizer requires the
+plan's exact natural frame count and applies the existing `enforce_total_frames` policy once:
+
+- trim to `target_frames`;
+- preserve the final anchored frame when `preserve_final_frame` is set;
+- trim/pad audio at the corresponding sample boundary, including final-anchor audio handling.
+
+An already compacted IMAGE input is rejected because its removed physical-group frames cannot be
+reconstructed after tracking or refinement.
+
 ## Why MODEL state is included
 
 Guide / Motion Context and hybrid First/Last + Reference workflows rely on Continuum's per-MODEL APPLY_MODEL wrapper, not only CONDITIONING. The wrapper performs Continuum layout/RoPE adaptation and mixed keyframe/reference normalization. Reusing an unrelated raw H3 MODEL for sampler 2 is therefore not a complete reproduction of sampler 1 semantics.

@@ -18,7 +18,10 @@ from ..reference_video import (
     REFERENCE_VIDEO_SIZE_OPTIONS,
 )
 from ..v2.decoder import enforce_total_frames
-from .assembly import H3ContinuumAssembleSeamExperimental
+from .assembly import (
+    H3ContinuumAssembleSeamExperimental,
+    finalize_assembled_timeline,
+)
 from .nodes import CATEGORY as CONTINUUM_CATEGORY, H3ContinuumSamplerProduction
 
 
@@ -32,6 +35,9 @@ V34_CONTINUITY_OPTIONS = (
     V34_CONTINUITY_STRONG,
     V2_CONTINUITY_OPTIONS[3],
 )
+V34_TIMELINE_EXACT = "Exact requested duration (Recommended)"
+V34_TIMELINE_NATURAL = "Natural retained timeline (Refinement)"
+V34_TIMELINE_MODES = (V34_TIMELINE_EXACT, V34_TIMELINE_NATURAL)
 
 
 def _normalize_v34_continuity(value: str) -> str:
@@ -431,6 +437,20 @@ class H3ContinuumAssembleSeamV34(H3ContinuumAssembleSeamExperimental):
     @classmethod
     def INPUT_TYPES(cls):
         schema = super().INPUT_TYPES()
+        required = dict(schema["required"])
+        required["timeline_mode"] = (
+            V34_TIMELINE_MODES,
+            {
+                "default": V34_TIMELINE_EXACT,
+                "display_name": "Timeline Output",
+                "tooltip": (
+                    "Exact requested duration keeps the normal V3.4 output. Natural retained "
+                    "timeline preserves every physical-group frame for downstream refinement; "
+                    "finish that branch with H3 Continuum Finalize Duration V3.4."
+                ),
+            },
+        )
+        schema["required"] = required
         optional = dict(schema.get("optional", {}))
         optional["driving_audio"] = (
             "AUDIO",
@@ -444,7 +464,16 @@ class H3ContinuumAssembleSeamV34(H3ContinuumAssembleSeamExperimental):
         schema["optional"] = optional
         return schema
 
-    def assemble(self, *args, driving_audio=None, **kwargs):
+    def assemble(self, *args, driving_audio=None, timeline_mode=None, **kwargs):
+        if timeline_mode is not None:
+            timeline_mode = _unwrap_single_audio_value(timeline_mode)
+            if timeline_mode not in V34_TIMELINE_MODES:
+                raise ValueError(f"unknown V3.4 Timeline Output mode: {timeline_mode!r}")
+            exact_value = timeline_mode == V34_TIMELINE_EXACT
+            if len(args) >= 4:
+                args = (*args[:3], exact_value, *args[4:])
+            else:
+                kwargs["exact_total_duration"] = exact_value
         preserved_audio = _driving_audio_from_plan(args, kwargs)
         images, audio, report = super().assemble(*args, **kwargs)
         selected = preserved_audio or _copy_audio(driving_audio)
@@ -482,12 +511,47 @@ class H3ContinuumAssembleSeamV34(H3ContinuumAssembleSeamExperimental):
         return images, selected, report
 
 
+class H3ContinuumFinalizeDurationV34:
+    """Finalize a natural post-refinement timeline with Continuum's exact policy."""
+
+    DEPRECATED = False
+    CATEGORY = CONTINUUM_CATEGORY
+    DESCRIPTION = (
+        "Apply the assembly plan's exact target duration after stitch-back, including "
+        "final-frame preservation and sample-aligned audio trim/pad semantics."
+    )
+    SEARCH_ALIASES = ["H3 post stitch duration", "H3 refinement finalizer"]
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "audio": ("AUDIO",),
+                "assembly_plan": ("H3_CONTINUUM_ASSEMBLY_PLAN",),
+            }
+        }
+
+    RETURN_TYPES = ("IMAGE", "AUDIO", "STRING")
+    RETURN_NAMES = ("images", "audio", "report")
+    FUNCTION = "finalize"
+
+    def finalize(self, images, audio, assembly_plan):
+        return finalize_assembled_timeline(
+            images=images,
+            audio=audio,
+            assembly_plan=assembly_plan,
+        )
+
+
 NODE_CLASS_MAPPINGS = {
     "H3ContinuumSamplerV34": H3ContinuumSamplerV34,
     "H3ContinuumAssembleSeamV34": H3ContinuumAssembleSeamV34,
+    "H3ContinuumFinalizeDurationV34": H3ContinuumFinalizeDurationV34,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "H3ContinuumSamplerV34": "H3 Continuum Sampler V3.4",
     "H3ContinuumAssembleSeamV34": "H3 Continuum Assemble + Seam V3.4",
+    "H3ContinuumFinalizeDurationV34": "H3 Continuum Finalize Duration V3.4",
 }
