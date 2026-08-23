@@ -406,6 +406,49 @@ def assemble_decoded_chunks(
     return result_images.contiguous(), result_audio, "\n".join(reports)
 
 
+def finalize_assembled_timeline(
+    *,
+    images: torch.Tensor,
+    audio: dict[str, Any],
+    assembly_plan: dict[str, Any],
+):
+    """Apply Continuum's exact-duration policy after downstream image processing.
+
+    The input video must still be the plan's natural retained timeline. This is
+    the public post-processing counterpart to ``exact_total_duration=False`` on
+    the assembler and reuses the same final-frame/audio policy as normal assembly.
+    """
+
+    plan = validate_assembly_plan(assembly_plan)
+    if not torch.is_tensor(images) or images.ndim != 4:
+        raise ValueError("finalizer images must be IMAGE [frames,H,W,C]")
+    groups = plan.get("decode_groups", plan["chunks"])
+    natural_frames = sum(int(item["net_frames"]) for item in groups)
+    if int(images.shape[0]) != natural_frames:
+        raise ValueError(
+            "H3 Continuum exact-duration finalizer requires the natural retained "
+            f"timeline: images={int(images.shape[0])}, plan={natural_frames}"
+        )
+
+    waveform, sample_rate = validate_audio(audio)
+    normalized_audio = {
+        "waveform": waveform.detach().to("cpu").contiguous(),
+        "sample_rate": int(sample_rate),
+    }
+    result_images, result_audio, duration_report = enforce_total_frames(
+        images,
+        normalized_audio,
+        target_frames=int(plan["target_frames"]),
+        preserve_final_frame=bool(plan.get("preserve_final_frame", False)),
+    )
+    report = (
+        "H3 Continuum Finalize Duration V3.4: "
+        f"natural={natural_frames}, target={int(plan['target_frames'])}.\n"
+        f"{duration_report}"
+    )
+    return result_images, result_audio, report
+
+
 class H3ContinuumAssembleV3:
     DESCRIPTION = (
         "Assemble full AV chunks decoded by ComfyUI Core. Trims decoded context, "

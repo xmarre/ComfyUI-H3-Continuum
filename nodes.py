@@ -388,6 +388,7 @@ NODE_DISPLAY_NAME_MAPPINGS.update(V34_NODE_DISPLAY_NAME_MAPPINGS)
 _primary_node_ids = {
     "H3ContinuumSamplerV34",
     "H3ContinuumAssembleSeamV34",
+    "H3ContinuumFinalizeDurationV34",
     "H3ContinuumClipOverrides",
     "H3ContinuumResult",
 }

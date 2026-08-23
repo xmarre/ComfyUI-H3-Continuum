@@ -17,6 +17,7 @@ const CONTINUITY_ALL = [
     CONTINUITY_FAST,
     CONTINUITY_STRONG,
 ];
+const TIMELINE_NATURAL = "Natural retained timeline (Refinement)";
 const SETTINGS = {
     detailedReport: "H3Continuum.DetailedReport",
     developerDiagnostics: "H3Continuum.DeveloperDiagnostics",
@@ -199,8 +200,9 @@ function refreshSampler(node) {
 
 function refreshAssembler(node) {
     const exact = findWidget(node, "exact_total_duration");
+    const timelineMode = findWidget(node, "timeline_mode");
     const diagnostics = findWidget(node, "diagnostics");
-    if (exact) exact.value = true;
+    if (exact) exact.value = timelineMode?.value !== TIMELINE_NATURAL;
     if (diagnostics) diagnostics.value = settingValue(SETTINGS.detailedReport, false) ? "Detailed Report" : "Basic";
     setWidgetVisible(exact, false);
     setWidgetVisible(diagnostics, false);
@@ -253,6 +255,7 @@ function install(node) {
         "reroll_from_chunk",
         "continuation_method",
         "audio_continuity",
+        "timeline_mode",
     ]) {
         const widget = findWidget(node, widgetName);
         if (!widget || widget.__h3ContinuumV34Callback) continue;
@@ -307,7 +310,9 @@ app.registerExtension({
                 refreshAssembler(node);
                 const apiNode = prompt.output?.[String(node.id)];
                 if (apiNode?.inputs) {
-                    apiNode.inputs.exact_total_duration = true;
+                    const timelineMode = findWidget(node, "timeline_mode");
+                    apiNode.inputs.exact_total_duration = timelineMode?.value !== TIMELINE_NATURAL;
+                    if (timelineMode) apiNode.inputs.timeline_mode = timelineMode.value;
                     apiNode.inputs.diagnostics = settingValue(SETTINGS.detailedReport, false)
                         ? "Detailed Report"
                         : "Basic";

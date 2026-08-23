@@ -160,7 +160,13 @@ Visible controls:
 
 Inputs: images, audio, assembly_plan, and driving_audio.
 
-Controls: Audio Seam and Video Seam.
+Controls: Audio Seam, Video Seam, and Timeline Output.
+
+`Exact requested duration (Recommended)` keeps the normal compact V3.4 result. Select
+`Natural retained timeline (Refinement)` when a downstream operation must process every frame in
+the physical decode groups. After that operation, connect its IMAGE result, the assembler AUDIO,
+and the same `assembly_plan` to **H3 Continuum Finalize Duration V3.4**. The finalizer reuses
+Continuum's validated final-frame preservation and sample-aligned audio duration policy.
 
 When Driving Audio is connected, preserved source audio is selected for final output and generated audio seam processing is bypassed.
 
@@ -181,6 +187,17 @@ audio_latents -> Core VAE Decode Audio -- audio  --+--> H3 Continuum Assemble + 
 assembly_plan -------------------------------------+
 driving_audio -------------------------------------+
 ~~~
+
+For a post-assembly image refinement branch:
+
+```text
+H3 Continuum Assemble + Seam V3.4
+  Timeline Output = Natural retained timeline (Refinement)
+                  |
+                  +--> natural images --> downstream refine/stitch --+
+                  +--> audio -----------------------------------------+--> H3 Continuum Finalize Duration V3.4
+assembly_plan ---------------------------------------------------------+
+```
 
 For a source video with sound:
 

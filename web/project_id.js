@@ -5,6 +5,7 @@ const TIMELINE_NODE_CLASS = "H3ContinuumSamplerTimelineVideo";
 const ASSEMBLE_SEAM_NODE_CLASS = "H3ContinuumAssembleSeamExperimental";
 const V34_NODE_CLASS = "H3ContinuumSamplerV34";
 const V34_ASSEMBLE_SEAM_NODE_CLASS = "H3ContinuumAssembleSeamV34";
+const V34_TIMELINE_NATURAL = "Natural retained timeline (Refinement)";
 const PROJECT_WIDGET = "project_id";
 const LEGACY_RUN_NAME_WIDGET = "run_name";
 const CHUNKS_WIDGET = "chunks";
@@ -210,7 +211,13 @@ function configureAssembler(node) {
         return false;
     }
     const exactDuration = findWidget(node, "exact_total_duration");
-    if (exactDuration) exactDuration.value = true;
+    const timelineMode = findWidget(node, "timeline_mode");
+    if (exactDuration) {
+        exactDuration.value = (
+            node.comfyClass !== V34_ASSEMBLE_SEAM_NODE_CLASS
+            || timelineMode?.value !== V34_TIMELINE_NATURAL
+        );
+    }
     applyRuntimeSettings(node);
     hidePersistentWidget(exactDuration);
     hidePersistentWidget(findWidget(node, "diagnostics"));
@@ -320,7 +327,14 @@ app.registerExtension({
                     apiNode.inputs.diagnostics = settingValue(SETTINGS.detailedReport, false)
                         ? "Detailed Report"
                         : "Basic";
-                    apiNode.inputs.exact_total_duration = true;
+                    const timelineMode = findWidget(node, "timeline_mode");
+                    apiNode.inputs.exact_total_duration = (
+                        node.comfyClass !== V34_ASSEMBLE_SEAM_NODE_CLASS
+                        || timelineMode?.value !== V34_TIMELINE_NATURAL
+                    );
+                    if (node.comfyClass === V34_ASSEMBLE_SEAM_NODE_CLASS && timelineMode) {
+                        apiNode.inputs.timeline_mode = timelineMode.value;
+                    }
                 }
             }
             if (!projectWidget) {
