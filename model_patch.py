@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 import logging
 from typing import Any, Callable
 
@@ -20,6 +19,12 @@ from .layout_adapter import (
     patch_layout_in_place,
     payload_has_continuum,
     validate_native_continuity_layout,
+)
+from .refdelta_interop import (
+    REFERENCE_DIAGNOSTIC_MODEL_OPTION,
+    RefDeltaDiagnosticInteropError,
+    reference_diagnostic_from_model,
+    replace_reference_diagnostic_model,
 )
 
 
@@ -106,6 +111,7 @@ def configure_continuum_model(model: Any, *, strict: bool, debug: bool):
     patched.model_options = model_options
     return patched
 
+
 def patch_model(model: Any, *, strict: bool, debug: bool):
     """Clone once, then install the Continuum wrapper on that clone."""
     if not hasattr(model, "clone"):
@@ -113,6 +119,7 @@ def patch_model(model: Any, *, strict: bool, debug: bool):
             "MODEL lacks the wrapper API required by H3 Continuum Join: clone"
         )
     return configure_continuum_model(model.clone(), strict=strict, debug=debug)
+
 
 def continuum_interop_request(*, chunk_index: int, context_frames: int) -> dict[str, Any]:
     return {
@@ -124,7 +131,7 @@ def continuum_interop_request(*, chunk_index: int, context_frames: int) -> dict[
     }
 
 
-def clone_model_for_chunk(
+def _clone_single_model_for_chunk(
     model: Any,
     *,
     strict: bool,
@@ -132,7 +139,7 @@ def clone_model_for_chunk(
     chunk_index: int,
     context_frames: int | None,
 ):
-    """Create a call-local MODEL and attach an optional read-only Spectrum hint."""
+    """Clone/configure one MODEL without expanding an attached diagnostic spec."""
     if not hasattr(model, "clone"):
         raise RuntimeError(
             "MODEL lacks the wrapper API required by H3 Continuum Join: clone"
@@ -159,5 +166,57 @@ def clone_model_for_chunk(
             chunk_index=int(chunk_index), context_frames=int(context_frames)
         )
     model_options["transformer_options"] = transformer_options
+    chunk_model.model_options = model_options
+    return chunk_model
+
+
+def clone_model_for_chunk(
+    model: Any,
+    *,
+    strict: bool,
+    debug: bool,
+    chunk_index: int,
+    context_frames: int | None,
+):
+    """Create call-local fused/reference MODELs with identical Continuum wrappers.
+
+    A RefDelta reference specification, when present, remains opaque to
+    Continuum.  The only special handling is to clone its genuine Ref2VA MODEL
+    through this same chunk wrapper/hint path and replace the spec's reference
+    with that call-local clone.  This keeps same-state diagnostics honest for
+    continuation chunks without introducing a hard dependency on the solver.
+    """
+    chunk_model = _clone_single_model_for_chunk(
+        model,
+        strict=strict,
+        debug=debug,
+        chunk_index=chunk_index,
+        context_frames=context_frames,
+    )
+    spec = reference_diagnostic_from_model(chunk_model)
+    if spec is None:
+        return chunk_model
+
+    reference_source = spec.reference_model
+    if reference_diagnostic_from_model(reference_source) is not None:
+        raise RefDeltaDiagnosticInteropError(
+            "nested RefDelta reference diagnostics are not supported"
+        )
+    reference_chunk_model = _clone_single_model_for_chunk(
+        reference_source,
+        strict=strict,
+        debug=debug,
+        chunk_index=chunk_index,
+        context_frames=context_frames,
+    )
+    reference_options = dict(getattr(reference_chunk_model, "model_options", None) or {})
+    reference_options.pop(REFERENCE_DIAGNOSTIC_MODEL_OPTION, None)
+    reference_chunk_model.model_options = reference_options
+
+    model_options = dict(getattr(chunk_model, "model_options", None) or {})
+    model_options[REFERENCE_DIAGNOSTIC_MODEL_OPTION] = replace_reference_diagnostic_model(
+        spec,
+        reference_chunk_model,
+    )
     chunk_model.model_options = model_options
     return chunk_model
