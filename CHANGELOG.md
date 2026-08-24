@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added optional structural interop for the MiniMax H3 RefDelta Solver's model-level reference diagnostic without adding a package dependency or public Continuum socket.
+- Continuum's internal BasicGuider now composes the diagnostic only when requested and gives fused/reference models the exact same per-chunk positive CONDITIONING with CFG=1 semantics; ordinary workflows keep the previous guider path.
+- Genuine Ref2VA reference models are cloned call-locally through the same Continuum APPLY_MODEL wrapper and chunk/context hint as the fused model, while malformed or nested diagnostic contracts fail closed.
+
 ## 3.4.2
 
 - Adapted upstream's V3.4 FL2VA terminal merge as an explicit physical-decode-group contract: 2×5-second FL2VA uses one Core-equivalent initial sample, while 3+ chunk merging is limited to Guide / Motion Context with the validated Balanced 22-frame prefix.
