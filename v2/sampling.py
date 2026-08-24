@@ -8,6 +8,7 @@ from typing import Any
 
 import torch
 
+from ..refdelta_interop import reference_diagnostic_from_model
 from ..state import extract_av_streams
 
 
@@ -73,12 +74,32 @@ def _make_basic_guider(model: Any, conditioning: list):
     except Exception as exc:  # pragma: no cover
         raise SamplingRuntimeError(f"ComfyUI sampler API unavailable: {exc}") from exc
 
-    class _BasicGuider(comfy.samplers.CFGGuider):
-        def set_positive(self, positive):
-            self.inner_set_conds({"positive": positive})
+    diagnostic = reference_diagnostic_from_model(model)
+    bases = (comfy.samplers.CFGGuider,)
+    if diagnostic is not None:
+        bases = (diagnostic.guider_mixin, comfy.samplers.CFGGuider)
+
+    try:
+        class _BasicGuider(*bases):
+            def set_positive(self, positive):
+                self.inner_set_conds({"positive": positive})
+    except TypeError as exc:
+        raise SamplingRuntimeError(
+            f"RefDelta reference diagnostic guider mixin is incompatible with ComfyUI CFGGuider: {exc}"
+        ) from exc
 
     guider = _BasicGuider(model)
     guider.set_positive(conditioning)
+    if diagnostic is not None:
+        initialize_reference = getattr(guider, "initialize_reference", None)
+        if not callable(initialize_reference):
+            raise SamplingRuntimeError(
+                "RefDelta reference diagnostic guider mixin does not initialize a reference MODEL"
+            )
+        # Exact same per-chunk positive CONDITIONING as the fused BasicGuider.
+        # The positive-only RefDelta mixin keeps CFG=1 semantics and prepares the
+        # independently wrapped genuine Ref2VA model during inner_sample().
+        initialize_reference(diagnostic.reference_model, conditioning, None)
     return guider
 
 
@@ -172,7 +193,7 @@ def latent_to_cpu(latent: dict[str, Any]) -> tuple[torch.Tensor, torch.Tensor]:
     return video_cpu, audio_cpu
 
 
-def latent_from_cpu(video: torch.Tensor, audio: torch.Tensor) -> dict[str, Any]:
+def latent_from_cpu(video: torch.Tensor, audio: torch.Tensor) -> dict[str, torch.Tensor]:
     try:
         import comfy.nested_tensor
     except Exception as exc:  # pragma: no cover
